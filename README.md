@@ -514,3 +514,9 @@ Third-party components keep their own licenses; see
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). "TigerTag" and "TigerScale"
 are project names, not a license to imply endorsement — the terms for using them
 on a product you sell are in [TRADEMARK.md](TRADEMARK.md).
+
+---
+
+<sub>Some hardware links above are Amazon affiliate links: as an Amazon Associate,
+TigerTag earns from qualifying purchases, at no extra cost to you. It helps fund the
+open protocol — and sourcing the same parts anywhere else works exactly as well.</sub>
