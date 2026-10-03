@@ -1,0 +1,181 @@
+package io.github.rp3ds.filscale
+
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.Context
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelUuid
+import org.json.JSONObject
+import java.util.UUID
+
+/**
+ * BLE link to the scale, in parallel with Wi-Fi. Same JSON as the WebSocket arrives as
+ * notifications on STATE; commands go out as JSON on CMD. Reconnects by itself.
+ * The caller must hold BLUETOOTH_SCAN / BLUETOOTH_CONNECT (API 31+) before start().
+ */
+@SuppressLint("MissingPermission")
+class ScaleBle(
+    context: Context,
+    private val linked: (Boolean) -> Unit,
+    private val frame: (JSONObject) -> Unit,
+) {
+    companion object {
+        val SERVICE: UUID = UUID.fromString("6e5f0001-b5a3-f393-e0a9-e50e24dcca9e")
+        val STATE: UUID = UUID.fromString("6e5f0002-b5a3-f393-e0a9-e50e24dcca9e")
+        val CMD: UUID = UUID.fromString("6e5f0003-b5a3-f393-e0a9-e50e24dcca9e")
+        private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private const val MTU = 185   // must match NimBLEDevice::setMTU on the firmware
+    }
+
+    private val ctx = context.applicationContext
+    private val adapter = (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    private val main = Handler(Looper.getMainLooper())
+
+    private var gatt: BluetoothGatt? = null
+    private var cmdChar: BluetoothGattCharacteristic? = null
+    private var scanning = false
+    private var wanted = false
+
+    private val scanCb = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            stopScan()
+            connect(result.device)
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            scanning = false
+            retryLater()
+        }
+    }
+
+    private val gattCb = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                g.requestMtu(MTU)
+            } else {
+                g.close()
+                if (g === gatt) {
+                    gatt = null
+                    cmdChar = null
+                    linked(false)
+                    retryLater()
+                }
+            }
+        }
+
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            g.discoverServices()
+        }
+
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            val svc = g.getService(SERVICE)
+            val state = svc?.getCharacteristic(STATE)
+            cmdChar = svc?.getCharacteristic(CMD)
+            if (state == null) {
+                g.disconnect()
+                return
+            }
+            g.setCharacteristicNotification(state, true)
+            val cccd = state.getDescriptor(CCCD) ?: return
+            val enable = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            if (Build.VERSION.SDK_INT >= 33) {
+                g.writeDescriptor(cccd, enable)
+            } else {
+                @Suppress("DEPRECATION")
+                run {
+                    cccd.value = enable
+                    g.writeDescriptor(cccd)
+                }
+            }
+        }
+
+        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) linked(true)
+        }
+
+        // API 33+: value delivered directly.
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) {
+            parse(value)
+        }
+
+        // API < 33: value sits on the characteristic. On 33+ the framework also calls this
+        // for compatibility, so ignore it there to avoid handling every frame twice.
+        @Deprecated("Deprecated in API 33")
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
+            if (Build.VERSION.SDK_INT < 33) {
+                @Suppress("DEPRECATION")
+                c.value?.let(::parse)
+            }
+        }
+    }
+
+    private fun parse(bytes: ByteArray) {
+        runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.onSuccess(frame)
+    }
+
+    fun start() {
+        wanted = true
+        if (adapter?.isEnabled != true || gatt != null || scanning) return
+        val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()
+        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        val scanner = adapter.bluetoothLeScanner ?: return
+        scanning = true
+        scanner.startScan(listOf(filter), settings, scanCb)
+    }
+
+    fun stop() {
+        wanted = false
+        main.removeCallbacksAndMessages(null)
+        stopScan()
+        gatt?.let { it.disconnect(); it.close() }
+        gatt = null
+        cmdChar = null
+        linked(false)
+    }
+
+    private fun stopScan() {
+        if (!scanning) return
+        scanning = false
+        runCatching { adapter?.bluetoothLeScanner?.stopScan(scanCb) }
+    }
+
+    private fun connect(dev: BluetoothDevice) {
+        gatt = dev.connectGatt(ctx, false, gattCb, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    private fun retryLater() {
+        if (!wanted) return
+        main.postDelayed({ start() }, 2_000)
+    }
+
+    val isLinked: Boolean get() = gatt != null && cmdChar != null
+
+    /** Sends {"cmd":...} to the scale; false when the link is not ready. */
+    fun send(json: String): Boolean {
+        val g = gatt ?: return false
+        val c = cmdChar ?: return false
+        val bytes = json.toByteArray(Charsets.UTF_8)
+        return if (Build.VERSION.SDK_INT >= 33) {
+            g.writeCharacteristic(c, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                c.value = bytes
+                g.writeCharacteristic(c)
+            }
+        }
+    }
+}

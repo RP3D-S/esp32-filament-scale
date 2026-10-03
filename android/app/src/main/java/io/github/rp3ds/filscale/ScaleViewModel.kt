@@ -10,7 +10,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
+/**
+ * Wi-Fi (WebSocket + HTTP) and BLE run in parallel and feed the same state. Commands
+ * prefer Wi-Fi and fall back to BLE, so the app keeps working when either link drops.
+ */
 class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("filscale", 0)
 
@@ -18,12 +23,18 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<ScaleState> = _state.asStateFlow()
 
     private val client = ScaleClient(
-        opened = { _state.update { it.copy(connected = true, message = null) } },
-        frame = { frame -> _state.update { it.merge(frame) } },
+        opened = { _state.update { it.copy(wifiLinked = true, message = null) } },
+        frame = { onFrame(it) },
         closed = { err ->
-            _state.update { it.copy(connected = false, message = err) }
+            _state.update { it.copy(wifiLinked = false, message = if (it.bleLinked) null else err) }
             scheduleReconnect()
         },
+    )
+
+    private val ble = ScaleBle(
+        app,
+        linked = { up -> _state.update { it.copy(bleLinked = up) } },
+        frame = { onFrame(it) },
     )
 
     private val discovery = ScaleDiscovery(app) { found ->
@@ -32,19 +43,29 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var reconnectJob: Job? = null
-    private var wantConnected = false
+    private var wantWifi = false
 
     init {
-        if (_state.value.host.isNotBlank()) connect() else search()
+        if (_state.value.host.isNotBlank()) connectWifi() else search()
     }
+
+    private fun onFrame(frame: JSONObject) {
+        _state.update { it.merge(frame) }
+        // BLE frames carry the scale's IP: if no Wi-Fi address is set yet, adopt it.
+        val s = _state.value
+        if (s.host.isBlank() && s.ip.isNotBlank()) setHost(s.ip)
+    }
+
+    /** Call once the Bluetooth permissions are granted. */
+    fun startBle() = ble.start()
 
     /** Accepts "192.168.1.50", "http://filscale-1A2B.local/" etc. */
     fun setHost(raw: String) {
         val host = raw.trim().removePrefix("http://").removePrefix("ws://").trimEnd('/')
-        if (host.isEmpty()) return
+        if (host.isEmpty() || (host == _state.value.host && _state.value.wifiLinked)) return
         prefs.edit().putString("host", host).apply()
         _state.update { it.copy(host = host) }
-        connect()
+        connectWifi()
     }
 
     fun search() {
@@ -57,39 +78,58 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun connect() {
-        wantConnected = true
+    private fun connectWifi() {
+        wantWifi = true
         reconnectJob?.cancel()
         val host = _state.value.host
         if (host.isNotBlank()) client.connect(host)
     }
 
     private fun scheduleReconnect() {
-        if (!wantConnected) return
+        if (!wantWifi) return
         reconnectJob?.cancel()
         reconnectJob = viewModelScope.launch {
             delay(2_000)
-            connect()
+            connectWifi()
         }
     }
 
-    fun tare() = command("/api/tare", "{}", "Tara feita")
+    fun tare() = command("/api/tare", "{}", """{"cmd":"tare"}""")
 
     fun calibrate(knownGrams: Float) =
-        command("/api/calibrate", """{"knownGrams":$knownGrams}""", "A calibrar…")
+        command("/api/calibrate", """{"knownGrams":$knownGrams}""", """{"cmd":"calibrate","grams":$knownGrams}""")
 
+    /** Asks the scale (over BLE) which Wi-Fi networks it can see. */
+    fun scanWifi() {
+        _state.update { it.copy(networks = emptyList()) }
+        if (!ble.send("""{"cmd":"wifi_scan"}""")) {
+            _state.update { it.copy(message = "Liga-te primeiro por Bluetooth") }
+        }
+    }
 
-    private fun command(path: String, body: String, okMessage: String?) {
-        val host = _state.value.host
-        if (host.isBlank()) return
-        client.post(host, path, body) { ok ->
-            _state.update { it.copy(message = if (ok) okMessage else "Falha: $path") }
+    /** Sends Wi-Fi credentials to the scale over BLE. */
+    fun configureWifi(ssid: String, pass: String) {
+        val body = org.json.JSONObject().put("cmd", "wifi").put("ssid", ssid).put("pass", pass).toString()
+        _state.update { it.copy(wifiNeedsBoot = false, wifiState = 1) }
+        if (!ble.send(body)) _state.update { it.copy(message = "Liga-te primeiro por Bluetooth", wifiState = 0) }
+    }
+
+    private fun command(path: String, httpBody: String, bleBody: String) {
+        val s = _state.value
+        when {
+            s.wifiLinked && s.host.isNotBlank() ->
+                client.post(s.host, path, httpBody) { ok ->
+                    if (!ok && !ble.send(bleBody)) _state.update { it.copy(message = "Falha: $path") }
+                }
+            ble.send(bleBody) -> Unit
+            else -> _state.update { it.copy(message = "Sem ligação à balança") }
         }
     }
 
     override fun onCleared() {
-        wantConnected = false
+        wantWifi = false
         discovery.stop()
+        ble.stop()
         client.disconnect()
     }
 }

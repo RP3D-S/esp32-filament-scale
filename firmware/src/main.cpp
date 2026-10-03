@@ -4,13 +4,13 @@
 // TigerScale V3 API (docs/API.md) for the fields it shares, plus a few additions.
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WiFiManager.h>
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncJson.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <HX711.h>
+#include <NimBLEDevice.h>
 #include <Adafruit_PN532.h>
 
 #ifndef FW_VERSION
@@ -23,6 +23,8 @@
 #define PN532_RXD    16   // Serial2 (<- PN532 TXD)
 #define PN532_TXD    17
 #define PN532_RST    27
+
+#define BOOT_BTN    0    // Wi-Fi changes over BLE need this pressed (unless offline)
 
 // ---- Tuning ---------------------------------------------------------------
 static const uint32_t WS_INTERVAL_MS      = 100;
@@ -97,6 +99,12 @@ static uint32_t stableSince = 0;
 // block for ~1 s on the HX711 and must not run on the async_tcp task.
 static volatile bool  pendTare = false;
 static volatile float pendCalGrams = 0;
+static volatile bool  pendWifi = false, pendScan = false;
+static String         pendSsid, pendPass;
+static uint32_t       bootBtnMs = 0;          // last time BOOT was seen pressed
+static uint32_t       wifiAttemptUntil = 0;   // >0 while a provisioning attempt runs
+static bool           wifiFailed = false;
+static bool           mdnsOn = false;
 
 
 // ---- Scale ----------------------------------------------------------------
@@ -162,31 +170,171 @@ static void putField(JsonDocument &d, const char *k, const T &v, T &last, bool f
     if (full || v != last) { d[k] = v; last = v; }
 }
 
+// Per-channel delta baseline: WebSocket and BLE each remember what they last sent.
+struct FrameState {
+    int    weight = -99999;
+    String uid, status;
+    bool   readerOk = false, scaleOk = false;
+    int    rssi = 1;
+};
+
 // Delta-compressed like upstream: a field is present only when it changed.
-// `full` forces every field (periodic snapshot).
-static String buildFrame(bool full) {
-    static int    lWeight = -99999;
-    static String lUid, lStatus;
-    static bool   lRdR = false, lScale = false;
-    static int    lRssi = 1;
+// `full` forces every field (periodic snapshot). `compact` keeps the frame
+// under one BLE notification (MTU 185) by dropping the Wi-Fi-only extras and
+// adding the IP, so the app can switch to Wi-Fi by itself.
+static String buildFrame(bool full, FrameState &st, bool compact = false) {
     StaticJsonDocument<768> d;
 
-    putField<int>   (d, "weight",          shownWeight,        lWeight, full);
-    putField<String>(d, "uid",             uid,                lUid,    full);
-    putField<String>(d, "scaleStatus",     scaleStatus,        lStatus, full);
-    putField<bool>  (d, "reader_ok",       reader.ok,          lRdR,    full);
-    putField<bool>  (d, "scale_ok",        scaleOk,            lScale,  full);
-    int rssi = (int)WiFi.RSSI();
-    putField<int>   (d, "wifi_signal_dbm", rssi,               lRssi,   full);
+    putField<int>   (d, "weight",          shownWeight,        st.weight,   full);
+    putField<String>(d, "uid",             uid,                st.uid,      full);
+    putField<String>(d, "scaleStatus",     scaleStatus,        st.status,   full);
+    putField<bool>  (d, "reader_ok",       reader.ok,          st.readerOk, full);
+    putField<bool>  (d, "scale_ok",        scaleOk,            st.scaleOk,  full);
+    if (!compact) {
+        int rssi = (int)WiFi.RSSI();
+        putField<int>(d, "wifi_signal_dbm", rssi,              st.rssi,     full);
+    }
     if (full) {
-        d["cloud"] = WiFi.status() == WL_CONNECTED;
-        d["calibrationFactor"] = calFactor;
-        d["uptime_s"] = millis() / 1000;
-        d["fw_version"] = FW_VERSION;
-        d["mdns"] = mdnsName + ".local";
+        if (!compact) {
+            d["calibrationFactor"] = calFactor;
+            d["cloud"] = WiFi.status() == WL_CONNECTED;
+            d["uptime_s"] = millis() / 1000;
+            d["fw_version"] = FW_VERSION;
+            d["mdns"] = mdnsName + ".local";
+        }
     }
     if (d.size() == 0) return "";
     String out; serializeJson(d, out); return out;
+}
+
+static FrameState wsState, bleState;
+
+// ---- BLE (NimBLE) ----------------------------------------------------------
+// Same JSON as the WebSocket, over one notify characteristic. Commands come back
+// as JSON on a write characteristic: {"cmd":"tare"} / {"cmd":"calibrate","grams":500}.
+static const char *BLE_SVC   = "6e5f0001-b5a3-f393-e0a9-e50e24dcca9e";
+static const char *BLE_STATE = "6e5f0002-b5a3-f393-e0a9-e50e24dcca9e";
+static const char *BLE_CMD   = "6e5f0003-b5a3-f393-e0a9-e50e24dcca9e";
+static NimBLECharacteristic *bleStateChr = nullptr;
+static volatile int  bleClients = 0;
+static volatile bool bleNeedFull = false;
+
+class BleServerCb : public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer *s, NimBLEConnInfo &info) override { bleClients = bleClients + 1; }
+    void onDisconnect(NimBLEServer *s, NimBLEConnInfo &info, int reason) override {
+        if (bleClients > 0) bleClients = bleClients - 1;
+        NimBLEDevice::startAdvertising();
+    }
+};
+
+class BleStateCb : public NimBLECharacteristicCallbacks {
+    // A client just enabled notifications: send it the full snapshot.
+    void onSubscribe(NimBLECharacteristic *c, NimBLEConnInfo &info, uint16_t subValue) override {
+        if (subValue) bleNeedFull = true;
+    }
+};
+
+static void bleSend(const String &json) {
+    if (!bleStateChr || bleClients == 0 || json.isEmpty()) return;
+    bleStateChr->setValue((const uint8_t *)json.c_str(), json.length());
+    bleStateChr->notify();
+}
+
+// 0 idle, 1 connecting, 2 connected, 3 failed
+static int wifiStateCode() {
+    if (WiFi.status() == WL_CONNECTED) return 2;
+    if (wifiAttemptUntil) return 1;
+    return wifiFailed ? 3 : 0;
+}
+
+class BleCmdCb : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic *c, NimBLEConnInfo &info) override {
+        NimBLEAttValue v = c->getValue();
+        StaticJsonDocument<256> d;
+        if (deserializeJson(d, (const char *)v.data(), v.size())) return;
+        const char *cmd = d["cmd"] | "";
+        if (!strcmp(cmd, "tare")) pendTare = true;
+        else if (!strcmp(cmd, "calibrate")) {
+            float g = d["grams"] | 0.0f;
+            if (g > 0) pendCalGrams = g;
+        } else if (!strcmp(cmd, "wifi_scan")) {
+            pendScan = true;
+        } else if (!strcmp(cmd, "wifi")) {
+            // Anyone in Bluetooth range could otherwise repoint the scale. Allow it
+            // when the scale has no Wi-Fi (first setup) or BOOT was pressed in the
+            // last 30 s (physical presence).
+            bool allowed = WiFi.status() != WL_CONNECTED || (bootBtnMs && millis() - bootBtnMs < 30000);
+            if (!allowed) { bleSend("{\"wifi_err\":\"boot\"}"); return; }
+            const char *ssid = d["ssid"] | "";
+            if (!*ssid) return;
+            pendSsid = ssid;
+            pendPass = String((const char *)(d["pass"] | ""));
+            pendWifi = true;
+        }
+    }
+};
+
+static void setupBle() {
+    NimBLEDevice::init(mdnsName.c_str());
+    NimBLEDevice::setMTU(185);
+    NimBLEServer *srv = NimBLEDevice::createServer();
+    srv->setCallbacks(new BleServerCb());
+    NimBLEService *svc = srv->createService(BLE_SVC);
+    bleStateChr = svc->createCharacteristic(BLE_STATE, NIMBLE_PROPERTY::NOTIFY);
+    bleStateChr->setCallbacks(new BleStateCb());
+    NimBLECharacteristic *cmd = svc->createCharacteristic(BLE_CMD, NIMBLE_PROPERTY::WRITE);
+    cmd->setCallbacks(new BleCmdCb());
+    svc->start();
+    NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+    adv->setName(mdnsName.c_str());
+    adv->addServiceUUID(BLE_SVC);
+    adv->enableScanResponse(true);
+    adv->start();
+    Serial.printf("[BLE] advertising as %s\n", mdnsName.c_str());
+}
+
+static FrameState bleNetState;   // separate frame: network facts that would not fit the MTU
+
+static void pumpBle(bool periodicFull) {
+    if (!bleStateChr || bleClients == 0) { bleState = FrameState(); bleNetState = FrameState(); return; }
+    bool full = periodicFull || bleNeedFull;
+    bleNeedFull = false;
+    bleSend(buildFrame(full, bleState, true));
+
+    // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
+    StaticJsonDocument<192> d;
+    static String lSsid, lIp;
+    static int lWst = -1;
+    String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
+    String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("");
+    int wst = wifiStateCode();
+    putField<String>(d, "ssid", ssid, lSsid, full);
+    putField<String>(d, "ip", ip, lIp, full);
+    putField<int>(d, "wst", wst, lWst, full);
+    if (full) d["calibrationFactor"] = calFactor;
+    if (d.size()) { String out; serializeJson(d, out); bleSend(out); }
+}
+
+// Scans for networks and sends the strongest few over BLE (fits one notification).
+static void doWifiScan() {
+    int n = WiFi.scanNetworks(false, false);
+    StaticJsonDocument<256> d;
+    JsonArray arr = d.createNestedArray("networks");
+    size_t used = 16;
+    for (int pass = 0; pass < n && arr.size() < 8; pass++) {
+        // WiFi.scanNetworks() already sorts by signal strength, strongest first
+        String name = WiFi.SSID(pass);
+        if (name.isEmpty()) continue;
+        if (name.length() > 24) name = name.substring(0, 24);
+        bool dup = false;
+        for (JsonVariant e : arr) if (name == e.as<const char *>()) dup = true;
+        if (dup || used + name.length() + 4 > 170) continue;
+        arr.add(name);
+        used += name.length() + 4;
+    }
+    WiFi.scanDelete();
+    String out; serializeJson(d, out);
+    bleSend(out);
 }
 
 static void onWsEvent(AsyncWebSocket *s, AsyncWebSocketClient *c, AwsEventType t,
@@ -285,20 +433,20 @@ void setup() {
     bool okR = reader.init();
     Serial.printf("[RFID] reader=%d\n", okR);
 
-    uint8_t mac[6]; WiFi.macAddress(mac);
+    uint64_t efuse = ESP.getEfuseMac();   // valid before Wi-Fi starts, unlike WiFi.macAddress()
+    uint8_t mac[6]; for (int i = 0; i < 6; i++) mac[i] = (efuse >> (8 * i)) & 0xFF;
     char n[24]; snprintf(n, sizeof n, "filscale-%02X%02X", mac[4], mac[5]);
     mdnsName = n;
 
+    // No captive portal: the phone app configures Wi-Fi over BLE. Saved credentials
+    // (if any) are used by WiFi.begin() with no arguments and kept in NVS.
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(n);
-    WiFiManager wm;
-    wm.setConfigPortalTimeout(180);
-    if (!wm.autoConnect("FilScale-Setup")) {
-        Serial.println("[WiFi] no connection, restarting");
-        ESP.restart();
-    }
-    if (MDNS.begin(n)) MDNS.addService("http", "tcp", 80);
-    Serial.printf("[WiFi] %s  http://%s.local\n", WiFi.localIP().toString().c_str(), n);
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(true);
+    pinMode(BOOT_BTN, INPUT_PULLUP);
+    setupBle();
+    WiFi.begin();
 
     setupRoutes();
     server.begin();
@@ -310,6 +458,25 @@ void loop() {
     if (pendTare)           { pendTare = false; doTare(); }
     if (pendCalGrams > 0)   { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
 
+    if (digitalRead(BOOT_BTN) == LOW) bootBtnMs = millis() ? millis() : 1;
+    if (pendScan)           { pendScan = false; doWifiScan(); }
+    if (pendWifi) {
+        pendWifi = false;
+        WiFi.disconnect(false, false);
+        WiFi.begin(pendSsid.c_str(), pendPass.c_str());
+        wifiAttemptUntil = millis() + 20000;
+        wifiFailed = false;
+    }
+    if (wifiAttemptUntil) {
+        if (WiFi.status() == WL_CONNECTED) wifiAttemptUntil = 0;
+        else if ((int32_t)(millis() - wifiAttemptUntil) >= 0) { wifiAttemptUntil = 0; wifiFailed = true; }
+    }
+    if (WiFi.status() == WL_CONNECTED && !mdnsOn) {
+        if (MDNS.begin(mdnsName.c_str())) { MDNS.addService("http", "tcp", 80); mdnsOn = true; }
+    } else if (WiFi.status() != WL_CONNECTED) {
+        mdnsOn = false;
+    }
+
     updateScale();
     pollRfid();
     updateStatus();
@@ -319,12 +486,13 @@ void loop() {
         bool full = millis() - lastFull >= WS_FULL_INTERVAL_MS;
         if (full) lastFull = millis();
         if (ws.count()) {
-            String f = buildFrame(full);
+            String f = buildFrame(full, wsState);
             if (f.length()) ws.textAll(f);
         } else {
-            buildFrame(true);   // keep the delta baseline in step with no listeners
+            wsState = FrameState();   // no listeners: next client gets a full frame
         }
         ws.cleanupClients();
+        pumpBle(full);
     }
     delay(1);
 }

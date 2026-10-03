@@ -1,28 +1,24 @@
 package io.github.rp3ds.filscale
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,23 +33,39 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     private val vm: ScaleViewModel by viewModels()
 
+    private val permissionRequest =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (result.values.all { it }) vm.startBle()
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val needed = if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (needed.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
+            vm.startBle()
+        } else {
+            permissionRequest.launch(needed)
+        }
+
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize()) {
+                Surface(Modifier.fillMaxSize(), color = Color(0xFF0B0E14)) {
                     val s by vm.state.collectAsStateWithLifecycle()
                     ScaleScreen(
                         s = s,
@@ -61,17 +73,14 @@ class MainActivity : ComponentActivity() {
                         onCalibrate = vm::calibrate,
                         onHost = vm::setHost,
                         onSearch = vm::search,
+                        onScanWifi = vm::scanWifi,
+                        onWifi = vm::configureWifi,
                     )
                 }
             }
         }
     }
 }
-
-private val Green = Color(0xFF4CAF50)
-private val Amber = Color(0xFFFFB300)
-private val Red = Color(0xFFE53935)
-private val Grey = Color(0xFF616161)
 
 @Composable
 fun ScaleScreen(
@@ -80,118 +89,147 @@ fun ScaleScreen(
     onCalibrate: (Float) -> Unit,
     onHost: (String) -> Unit,
     onSearch: () -> Unit,
+    onScanWifi: () -> Unit,
+    onWifi: (String, String) -> Unit,
 ) {
-    var showHost by remember { mutableStateOf(false) }
-    var showCal by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        DeviceScreen(s)
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onTare, enabled = s.connected, modifier = Modifier.weight(1f)) { Text("Tara") }
-            OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.weight(1f)) {
-                Text("Calibrar")
-            }
+        ScaleDisplay(s, onTare = onTare, onSettings = { showSettings = true })
+        s.message?.let {
+            Text(it, color = Color(0xFFF2B705), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Ligação", fontWeight = FontWeight.Medium)
-            Text(
-                when {
-                    s.connected -> "Ligado a ${s.host}"
-                    s.searching -> "A procurar a balança na rede…"
-                    s.host.isBlank() -> "Sem balança configurada"
-                    else -> "A tentar ligar a ${s.host}…"
-                },
-                fontSize = 13.sp,
-            )
-            if (s.firmware.isNotEmpty()) {
-                Text("Firmware ${s.firmware} · Wi-Fi ${s.rssi} dBm · fator ${"%.2f".format(s.calibration)}",
-                    fontSize = 12.sp, color = Grey)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSearch, enabled = !s.searching) { Text("Procurar") }
-                OutlinedButton(onClick = { showHost = true }) { Text("IP manual") }
-            }
-        }
-
-        s.message?.let { Text(it, color = Amber, fontSize = 13.sp) }
     }
 
+    if (showSettings) {
+        SettingsDialog(s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi)
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    s: ScaleState,
+    onDismiss: () -> Unit,
+    onCalibrate: (Float) -> Unit,
+    onHost: (String) -> Unit,
+    onSearch: () -> Unit,
+    onScanWifi: () -> Unit,
+    onWifi: (String, String) -> Unit,
+) {
+    var showCal by remember { mutableStateOf(false) }
+    var showHost by remember { mutableStateOf(false) }
+    var showWifi by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Definições") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Bluetooth: ", fontWeight = FontWeight.Medium)
+                    Text(if (s.bleLinked) "ligado" else "à procura da balança…")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Wi-Fi: ", fontWeight = FontWeight.Medium)
+                    Text(
+                        when {
+                            s.wifiLinked -> "ligado (${s.host})"
+                            s.wifiState == 2 -> "balança em ${s.ssid}, a ligar…"
+                            s.wifiState == 1 -> "a ligar a rede…"
+                            s.wifiState == 3 -> "falhou, verifica a palavra-passe"
+                            else -> "sem rede configurada"
+                        },
+                    )
+                }
+                Text(
+                    "Leitor NFC: ${if (s.readerOk) "OK" else "não detetado"} · " +
+                        "Célula de carga: ${if (s.scaleOk) "OK" else "sem resposta"}",
+                    fontSize = 12.sp, color = Color(0xFF8A93A6),
+                )
+                if (s.firmware.isNotEmpty()) {
+                    Text(
+                        "Firmware ${s.firmware} · fator ${"%.2f".format(s.calibration)}",
+                        fontSize = 12.sp, color = Color(0xFF8A93A6),
+                    )
+                }
+                OutlinedButton(
+                    onClick = { onScanWifi(); showWifi = true },
+                    enabled = s.bleLinked,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Configurar Wi-Fi da balança") }
+                OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
+                    Text("Calibrar")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onSearch, enabled = !s.searching) { Text("Procurar") }
+                    OutlinedButton(onClick = { showHost = true }) { Text("IP manual") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+    )
+
+    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
     if (showCal) CalibrateDialog({ showCal = false }) { onCalibrate(it); showCal = false }
 }
 
-/** The 480x320 "display" of the physical scale, redrawn on the phone. */
+/** Wi-Fi provisioning over BLE: pick a network the scale can see, type the password. */
 @Composable
-private fun DeviceScreen(s: ScaleState) {
-    val statusColor = when {
-        !s.connected -> Grey
-        !s.scaleOk -> Red
-        s.status == "stable" -> Green
-        s.status == "scanning" -> Amber
-        else -> Grey
-    }
-    val statusText = when {
-        !s.connected -> "Sem ligação"
-        !s.scaleOk -> "Célula de carga sem resposta"
-        s.status == "stable" -> "Estável"
-        s.status == "scanning" -> "A ler a tag…"
-        else -> "Coloca uma bobine"
-    }
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(480f / 320f)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black)
-            .border(BorderStroke(3.dp, statusColor), RoundedCornerShape(14.dp))
-            .padding(14.dp),
-    ) {
-        Row(Modifier.align(Alignment.TopStart), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Led("NFC", s.readerOk)
-        }
-        Text(
-            if (s.connected) "${s.rssi} dBm" else "",
-            modifier = Modifier.align(Alignment.TopEnd),
-            color = Grey, fontSize = 12.sp,
-        )
-        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    if (s.connected) s.weight.toString() else "--",
-                    fontSize = 84.sp, fontWeight = FontWeight.Bold, color = Color.White,
+private fun WifiDialog(
+    s: ScaleState,
+    onDismiss: () -> Unit,
+    onScan: () -> Unit,
+    onOk: (String, String) -> Unit,
+) {
+    var ssid by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Wi-Fi da balança") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Redes que a balança vê (2,4 GHz):", fontSize = 13.sp)
+                if (s.networks.isEmpty()) Text("A procurar…", fontSize = 13.sp, color = Color(0xFF8A93A6))
+                s.networks.forEach { n ->
+                    Text(
+                        n,
+                        Modifier
+                            .fillMaxWidth()
+                            .background(if (n == ssid) Color(0xFF2F7FFF) else Color(0xFF141821))
+                            .clickable { ssid = n }
+                            .padding(10.dp),
+                    )
+                }
+                TextButton(onClick = onScan) { Text("Procurar de novo") }
+                OutlinedTextField(
+                    value = ssid, onValueChange = { ssid = it }, singleLine = true,
+                    label = { Text("Nome da rede") },
                 )
-                Text(" g", fontSize = 28.sp, color = Grey, modifier = Modifier.padding(bottom = 14.dp))
+                OutlinedTextField(
+                    value = pass, onValueChange = { pass = it }, singleLine = true,
+                    label = { Text("Palavra-passe") },
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                if (s.wifiNeedsBoot) {
+                    Text(
+                        "A balança já tem Wi-Fi. Carrega no botão BOOT do ESP32 e tenta outra vez (30 s).",
+                        color = Color(0xFFE8821E), fontSize = 13.sp,
+                    )
+                }
+                when (s.wifiState) {
+                    1 -> Text("A ligar…", color = Color(0xFF2F7FFF))
+                    2 -> Text("Ligado a ${s.ssid} (${s.ip})", color = Color(0xFF3BA55D))
+                    3 -> Text("Não foi possível ligar. Verifica a palavra-passe.", color = Color(0xFFE24B4A))
+                }
             }
-            Text(statusText, color = statusColor, fontSize = 16.sp)
-        }
-        Text(
-            s.uid.ifEmpty { "sem tag" },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 14.sp,
-            color = if (s.uid.isEmpty()) Grey else Color.White,
-        )
-    }
-}
-
-@Composable
-private fun Led(label: String, on: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(if (on) Green else Red))
-        Text(label, color = Grey, fontSize = 12.sp)
-    }
+        },
+        confirmButton = { TextButton(onClick = { if (ssid.isNotBlank()) onOk(ssid, pass) }) { Text("Ligar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+    )
 }
 
 @Composable
@@ -219,8 +257,10 @@ private fun CalibrateDialog(onDismiss: () -> Unit, onOk: (Float) -> Unit) {
         title = { Text("Calibrar") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("1. Retira tudo da balança e faz a tara.\n2. Coloca um peso conhecido.\n3. Indica o peso e confirma.",
-                    fontSize = 13.sp)
+                Text(
+                    "1. Retira tudo da balança e faz a tara.\n2. Coloca um peso conhecido.\n3. Indica o peso e confirma.",
+                    fontSize = 13.sp,
+                )
                 OutlinedTextField(
                     value = text, onValueChange = { text = it }, singleLine = true,
                     label = { Text("Peso conhecido (g)") },
