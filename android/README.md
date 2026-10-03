@@ -1,10 +1,10 @@
 # FilScale Android app
 
 Phone replacement for the scale's removed LCD. It draws a 480x320 "screen"
-(weight, status, tag UID, reader LEDs) and has Tare, Calibrate and servo controls.
+(weight, status, tag UID, reader LED) and has Tare and Calibrate controls.
 
 - Live data: `ws://<scale>/ws` (delta frames; absent field = unchanged)
-- Commands: `POST /api/tare`, `/api/calibrate`, `/api/servo`
+- Commands: `POST /api/tare`, `/api/calibrate`
 - Finds the scale by mDNS (`filscale-XXXX`), or type the IP manually
 
 ## Build

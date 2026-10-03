@@ -27,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -60,7 +59,6 @@ class MainActivity : ComponentActivity() {
                         s = s,
                         onTare = vm::tare,
                         onCalibrate = vm::calibrate,
-                        onServo = vm::setServo,
                         onHost = vm::setHost,
                         onSearch = vm::search,
                     )
@@ -80,7 +78,6 @@ fun ScaleScreen(
     s: ScaleState,
     onTare: () -> Unit,
     onCalibrate: (Float) -> Unit,
-    onServo: (Boolean) -> Unit,
     onHost: (String) -> Unit,
     onSearch: () -> Unit,
 ) {
@@ -101,14 +98,6 @@ fun ScaleScreen(
             OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.weight(1f)) {
                 Text("Calibrar")
             }
-        }
-
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Motor da bobine", fontWeight = FontWeight.Medium)
-                Text("Roda a bobine até ler a tag", fontSize = 12.sp, color = Grey)
-            }
-            Switch(checked = s.servoEnabled, onCheckedChange = onServo, enabled = s.connected)
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -167,8 +156,7 @@ private fun DeviceScreen(s: ScaleState) {
             .padding(14.dp),
     ) {
         Row(Modifier.align(Alignment.TopStart), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Led("D", s.readerRight)
-            Led("E", s.readerLeft)
+            Led("NFC", s.readerOk)
         }
         Text(
             if (s.connected) "${s.rssi} dBm" else "",

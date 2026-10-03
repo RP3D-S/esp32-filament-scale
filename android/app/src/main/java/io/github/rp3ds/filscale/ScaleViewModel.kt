@@ -78,8 +78,6 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     fun calibrate(knownGrams: Float) =
         command("/api/calibrate", """{"knownGrams":$knownGrams}""", "A calibrar…")
 
-    fun setServo(enabled: Boolean) =
-        command("/api/servo", """{"enabled":$enabled}""", null)
 
     private fun command(path: String, body: String, okMessage: String?) {
         val host = _state.value.host

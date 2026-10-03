@@ -1,5 +1,5 @@
 // Headless filament scale for ESP32 WROOM-32.
-// HX711 load cell + 2x PN532 (HSU) + optional continuous-rotation servo.
+// HX711 load cell + 1x PN532 (HSU).
 // State goes to the phone over HTTP + WebSocket; protocol mirrors the upstream
 // TigerScale V3 API (docs/API.md) for the fields it shares, plus a few additions.
 #include <Arduino.h>
@@ -12,7 +12,6 @@
 #include <Preferences.h>
 #include <HX711.h>
 #include <Adafruit_PN532.h>
-#include <ESP32Servo.h>
 
 #ifndef FW_VERSION
 #define FW_VERSION "dev"
@@ -21,13 +20,9 @@
 // ---- Pins (see docs/WROOM32_PORT.md) --------------------------------------
 #define HX711_DOUT   32
 #define HX711_SCK    33
-#define PN532_1_RXD  16   // Serial2, "right" reader
-#define PN532_1_TXD  17
-#define PN532_1_RST  27
-#define PN532_2_RXD  25   // Serial1 (remapped), "left" reader
-#define PN532_2_TXD  26
-#define PN532_2_RST  13
-#define SERVO_PIN    18
+#define PN532_RXD    16   // Serial2 (<- PN532 TXD)
+#define PN532_TXD    17
+#define PN532_RST    27
 
 // ---- Tuning ---------------------------------------------------------------
 static const uint32_t WS_INTERVAL_MS      = 100;
@@ -39,9 +34,6 @@ static const float    EMA_SLOW            = 0.15f;
 static const float    EMA_FAST            = 0.6f;
 static const float    FAST_DELTA_G        = 5.0f;
 static const uint32_t STABLE_MS           = 1200;
-static const int      SERVO_STOP_US       = 1500;
-static const int      SERVO_SEARCH_US     = 1650;
-static const uint32_t SERVO_SCAN_MS       = 6000;
 
 // ---- PN532 over HSU -------------------------------------------------------
 class Reader {
@@ -81,15 +73,12 @@ private:
 
 // ---- Globals --------------------------------------------------------------
 static HX711 scale;
-static Reader rdRight(PN532_1_RST, Serial2, PN532_1_RXD, PN532_1_TXD);
-static Reader rdLeft (PN532_2_RST, Serial1, PN532_2_RXD, PN532_2_TXD);
-static Servo servo;
+static Reader reader(PN532_RST, Serial2, PN532_RXD, PN532_TXD);
 static Preferences prefs;
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
 
 static float   calFactor   = 420.0f;   // placeholder: calibrate with a known weight
-static bool    servoEnabled = false;
 static String  mdnsName;
 
 static float   rawWeight = 0, filtered = 0;
@@ -97,8 +86,8 @@ static int     shownWeight = 0;
 static bool    scaleOk = false;
 static uint32_t lastScaleOkMs = 0;
 
-static String  uidRight, uidLeft;
-static uint32_t seenRight = 0, seenLeft = 0;
+static String  uid;
+static uint32_t seenMs = 0;
 
 static String  scaleStatus = "idle";
 static float   stableRef = 0;
@@ -108,12 +97,7 @@ static uint32_t stableSince = 0;
 // block for ~1 s on the HX711 and must not run on the async_tcp task.
 static volatile bool  pendTare = false;
 static volatile float pendCalGrams = 0;
-static volatile int   pendServoUs = 0;
-static volatile uint32_t pendServoMs = 0;
 
-static uint32_t servoUntil = 0;
-static bool     servoSpinning = false;
-static uint32_t scanStart = 0;
 
 // ---- Scale ----------------------------------------------------------------
 static void saveTare() {
@@ -127,7 +111,7 @@ static void doTare() {
     scale.tare(10);
     saveTare();
     filtered = 0; shownWeight = 0;
-    uidLeft = uidRight = "";
+    uid = "";
 }
 
 static void doCalibrate(float grams) {
@@ -157,7 +141,6 @@ static void updateScale() {
 }
 
 static void updateStatus() {
-    const String &uid = uidRight.length() ? uidRight : uidLeft;
     if (shownWeight < PRESENT_G) { scaleStatus = "idle"; return; }
     bool stable = millis() - stableSince >= STABLE_MS;
     scaleStatus = (uid.length() && stable) ? "stable" : "scanning";
@@ -166,38 +149,11 @@ static void updateStatus() {
 // ---- RFID -----------------------------------------------------------------
 static void pollRfid() {
     static uint32_t last = 0;
-    static bool turn = false;
     if (millis() - last < RFID_POLL_MS) return;
     last = millis();
-    turn = !turn;
     String u;
-    if (turn && rdRight.ok) { if (rdRight.poll(u)) { uidRight = u; seenRight = millis(); } }
-    if (!turn && rdLeft.ok) { if (rdLeft.poll(u))  { uidLeft  = u; seenLeft  = millis(); } }
-    if (uidRight.length() && millis() - seenRight > RFID_LOST_MS) uidRight = "";
-    if (uidLeft.length()  && millis() - seenLeft  > RFID_LOST_MS) uidLeft  = "";
-}
-
-// ---- Servo ----------------------------------------------------------------
-static void servoWrite(int us) {
-    servo.writeMicroseconds(us);
-    servoSpinning = (us != SERVO_STOP_US);
-}
-
-// Spin a spool on the platform until a tag is found, like upstream's scan:
-// only when enabled, weight present, no tag yet; gives up after SERVO_SCAN_MS.
-static void servoLogic() {
-    if (servoUntil) {                        // manual test pulse takes priority
-        if ((int32_t)(millis() - servoUntil) >= 0) { servoWrite(SERVO_STOP_US); servoUntil = 0; }
-        return;
-    }
-    bool want = servoEnabled && shownWeight >= PRESENT_G &&
-                !uidRight.length() && !uidLeft.length();
-    if (want) {
-        if (!servoSpinning) { scanStart = millis(); servoWrite(SERVO_SEARCH_US); }
-        else if (millis() - scanStart > SERVO_SCAN_MS) servoWrite(SERVO_STOP_US);
-    } else if (servoSpinning) {
-        servoWrite(SERVO_STOP_US);
-    }
+    if (reader.ok && reader.poll(u)) { uid = u; seenMs = millis(); }
+    if (uid.length() && millis() - seenMs > RFID_LOST_MS) uid = "";
 }
 
 // ---- JSON / WebSocket -----------------------------------------------------
@@ -210,30 +166,24 @@ static void putField(JsonDocument &d, const char *k, const T &v, T &last, bool f
 // `full` forces every field (periodic snapshot).
 static String buildFrame(bool full) {
     static int    lWeight = -99999;
-    static String lUidR, lUidL, lStatus;
-    static bool   lRdR = false, lRdL = false, lScale = false, lServo = false;
+    static String lUid, lStatus;
+    static bool   lRdR = false, lScale = false;
     static int    lRssi = 1;
     StaticJsonDocument<768> d;
 
     putField<int>   (d, "weight",          shownWeight,        lWeight, full);
-    putField<String>(d, "uid_right",       uidRight,           lUidR,   full);
-    putField<String>(d, "uid_left",        uidLeft,            lUidL,   full);
+    putField<String>(d, "uid",             uid,                lUid,    full);
     putField<String>(d, "scaleStatus",     scaleStatus,        lStatus, full);
-    putField<bool>  (d, "reader_right",    rdRight.ok,         lRdR,    full);
-    putField<bool>  (d, "reader_left",     rdLeft.ok,          lRdL,    full);
+    putField<bool>  (d, "reader_ok",       reader.ok,          lRdR,    full);
     putField<bool>  (d, "scale_ok",        scaleOk,            lScale,  full);
-    putField<bool>  (d, "servoEnabled",    servoEnabled,       lServo,  full);
     int rssi = (int)WiFi.RSSI();
     putField<int>   (d, "wifi_signal_dbm", rssi,               lRssi,   full);
     if (full) {
-        d["uid"]  = uidRight.length() ? uidRight : uidLeft;
         d["cloud"] = WiFi.status() == WL_CONNECTED;
         d["calibrationFactor"] = calFactor;
         d["uptime_s"] = millis() / 1000;
         d["fw_version"] = FW_VERSION;
         d["mdns"] = mdnsName + ".local";
-    } else if (d.size() > 0) {
-        d["uid"] = uidRight.length() ? uidRight : uidLeft;   // cheap, keeps clients simple
     }
     if (d.size() == 0) return "";
     String out; serializeJson(d, out); return out;
@@ -244,11 +194,9 @@ static void onWsEvent(AsyncWebSocket *s, AsyncWebSocketClient *c, AwsEventType t
     if (t == WS_EVT_CONNECT) {
         // Full snapshot for the new client only; do not touch the shared delta state.
         StaticJsonDocument<768> d;
-        d["weight"] = shownWeight; d["uid_right"] = uidRight; d["uid_left"] = uidLeft;
-        d["uid"] = uidRight.length() ? uidRight : uidLeft;
-        d["scaleStatus"] = scaleStatus; d["reader_right"] = rdRight.ok;
-        d["reader_left"] = rdLeft.ok; d["scale_ok"] = scaleOk;
-        d["servoEnabled"] = servoEnabled; d["calibrationFactor"] = calFactor;
+        d["weight"] = shownWeight; d["uid"] = uid;
+        d["scaleStatus"] = scaleStatus; d["reader_ok"] = reader.ok;
+        d["scale_ok"] = scaleOk; d["calibrationFactor"] = calFactor;
         d["uptime_s"] = millis() / 1000; d["fw_version"] = FW_VERSION;
         d["wifi_signal_dbm"] = (int)WiFi.RSSI(); d["cloud"] = true;
         d["mdns"] = mdnsName + ".local";
@@ -260,13 +208,11 @@ static void onWsEvent(AsyncWebSocket *s, AsyncWebSocketClient *c, AwsEventType t
 static void sendStatusJson(AsyncWebServerRequest *r) {
     StaticJsonDocument<768> d;
     d["weight"] = shownWeight; d["rawWeight"] = rawWeight;
-    d["uid"] = uidRight.length() ? uidRight : uidLeft;
-    d["uid_right"] = uidRight; d["uid_left"] = uidLeft;
+    d["uid"] = uid;
     d["wifi"] = WiFi.SSID(); d["ip"] = WiFi.localIP().toString();
     d["mdns"] = mdnsName + ".local"; d["cloud"] = WiFi.status() == WL_CONNECTED;
-    d["calibrationFactor"] = calFactor; d["servoEnabled"] = servoEnabled;
     d["scaleStatus"] = scaleStatus; d["scale_ok"] = scaleOk;
-    d["reader_right"] = rdRight.ok; d["reader_left"] = rdLeft.ok;
+    d["reader_ok"] = reader.ok; d["calibrationFactor"] = calFactor;
     d["uptime_s"] = millis() / 1000; d["fw_version"] = FW_VERSION;
     d["wifi_signal_dbm"] = (int)WiFi.RSSI();
     String out; serializeJson(d, out);
@@ -315,20 +261,6 @@ static void setupRoutes() {
         });
     server.addHandler(cal2);
 
-    // {"enabled":true} turns spool scanning on; {"us":1650,"ms":1000} runs a test pulse.
-    auto *sv = new AsyncCallbackJsonWebHandler("/api/servo",
-        [](AsyncWebServerRequest *r, JsonVariant &j) {
-            if (j.containsKey("enabled")) {
-                servoEnabled = j["enabled"].as<bool>();
-                prefs.begin("scale", false); prefs.putBool("servo", servoEnabled); prefs.end();
-            }
-            if (j.containsKey("us")) {
-                pendServoMs = constrain((int)(j["ms"] | 1000), 100, 5000);
-                pendServoUs = constrain((int)j["us"], 1000, 2000);
-            }
-            r->send(200, "application/json", "{\"ok\":true}");
-        });
-    server.addHandler(sv);
 
     server.onNotFound([](AsyncWebServerRequest *r) { r->send(404, "text/plain", "not found"); });
 }
@@ -341,7 +273,6 @@ void setup() {
 
     prefs.begin("scale", true);
     calFactor    = prefs.getFloat("cal", calFactor);
-    servoEnabled = prefs.getBool("servo", false);
     long tare    = prefs.getLong("tare", 0);
     prefs.end();
 
@@ -350,13 +281,9 @@ void setup() {
     if (tare != 0) scale.set_offset(tare);
     else if (scale.wait_ready_timeout(1000)) { scale.tare(10); saveTare(); }
 
-    servo.setPeriodHertz(50);
-    servo.attach(SERVO_PIN, 500, 2500);
-    servoWrite(SERVO_STOP_US);
 
-    bool okR = rdRight.init();
-    bool okL = rdLeft.init();
-    Serial.printf("[RFID] right=%d left=%d\n", okR, okL);
+    bool okR = reader.init();
+    Serial.printf("[RFID] reader=%d\n", okR);
 
     uint8_t mac[6]; WiFi.macAddress(mac);
     char n[24]; snprintf(n, sizeof n, "filscale-%02X%02X", mac[4], mac[5]);
@@ -382,12 +309,10 @@ void loop() {
 
     if (pendTare)           { pendTare = false; doTare(); }
     if (pendCalGrams > 0)   { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
-    if (pendServoUs)        { servoWrite(pendServoUs); servoUntil = millis() + pendServoMs; pendServoUs = 0; }
 
     updateScale();
     pollRfid();
     updateStatus();
-    servoLogic();
 
     if (millis() - lastWs >= WS_INTERVAL_MS) {
         lastWs = millis();
