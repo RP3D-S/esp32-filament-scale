@@ -9,7 +9,8 @@ Phone replacement for the scale's removed LCD. It draws a 480x320 "screen"
 
 ## Build
 Open the `android/` folder in Android Studio (Koala or newer, JDK 17) and run.
-Android Studio generates the Gradle wrapper on first sync. The phone must be on the
+The Gradle wrapper is included (needs JDK 17: `JAVA_HOME` = a JDK 17, then `gradlew assembleDebug`). The phone must be on the
 same Wi-Fi as the scale.
 
-Status: written without an Android SDK available, so it has not been compiled yet.
+
+Builds clean with JDK 17 + Gradle 8.7 + SDK 34. BLE and Wi-Fi provisioning not yet tested on a phone.
