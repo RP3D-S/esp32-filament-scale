@@ -60,8 +60,10 @@ private fun badgeFor(s: ScaleState): Badge = when {
     !s.connected -> Badge("Sem ligação", RED)
     !s.scaleOk -> Badge("Erro", RED)
     s.status == "scanning" -> Badge("A pesar", ACCENT, spin = true)
-    s.status == "stable" -> Badge("Sincronizado!", GREEN)
-    else -> Badge("Pronto", GREEN)
+    s.status == "stable" && s.fbState == 2 -> Badge("Sincronizado!", GREEN)
+    s.fbState == 2 -> Badge("Pronto", GREEN)
+    s.fbState == 1 -> Badge("A ligar…", ACCENT, spin = true)
+    else -> Badge("Sem conta", RED)
 }
 
 /**
@@ -119,7 +121,7 @@ fun ScaleDisplay(
 
         // ---- Top-centre: name ----
         Box(Modifier.fillMaxWidth().offset(y = d(6f)), contentAlignment = Alignment.TopCenter) {
-            Text("FilScale", color = TEXT, fontSize = f(20f))
+            Text(if (s.fbState == 2 && s.fbName.isNotBlank()) s.fbName else "FilScale", color = TEXT, fontSize = f(20f))
         }
 
         // ---- Top-right: link icons ----

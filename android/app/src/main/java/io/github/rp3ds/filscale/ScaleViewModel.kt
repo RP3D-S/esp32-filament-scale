@@ -111,7 +111,18 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     fun configureWifi(ssid: String, pass: String) {
         val body = org.json.JSONObject().put("cmd", "wifi").put("ssid", ssid).put("pass", pass).toString()
         _state.update { it.copy(wifiNeedsBoot = false, wifiState = 1) }
-        if (!ble.send(body)) _state.update { it.copy(message = "Liga-te primeiro por Bluetooth", wifiState = 0) }
+        if (!ble.sendSecure(body)) _state.update { it.copy(message = "Liga-te primeiro por Bluetooth", wifiState = 0) }
+    }
+
+    /** Signs the scale in to the TigerTag cloud. Goes over the encrypted BLE characteristic. */
+    fun loginFirebase(email: String, password: String) {
+        val body = JSONObject().put("cmd", "fb_login").put("email", email).put("pass", password).toString()
+        _state.update { it.copy(fbNeedsBoot = false, fbError = "", fbState = 1) }
+        if (!ble.sendSecure(body)) _state.update { it.copy(message = "Liga-te primeiro por Bluetooth", fbState = 0) }
+    }
+
+    fun logoutFirebase() {
+        ble.sendSecure("""{"cmd":"fb_logout"}""")
     }
 
     private fun command(path: String, httpBody: String, bleBody: String) {

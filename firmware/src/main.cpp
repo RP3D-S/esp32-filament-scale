@@ -11,6 +11,7 @@
 #include <Preferences.h>
 #include <HX711.h>
 #include <NimBLEDevice.h>
+#include "firebase.h"
 #include <Adafruit_PN532.h>
 
 #ifndef FW_VERSION
@@ -215,6 +216,8 @@ static FrameState wsState, bleState;
 static const char *BLE_SVC   = "6e5f0001-b5a3-f393-e0a9-e50e24dcca9e";
 static const char *BLE_STATE = "6e5f0002-b5a3-f393-e0a9-e50e24dcca9e";
 static const char *BLE_CMD   = "6e5f0003-b5a3-f393-e0a9-e50e24dcca9e";
+// Needs an encrypted (paired) link: carries Wi-Fi and account passwords.
+static const char *BLE_SEC   = "6e5f0004-b5a3-f393-e0a9-e50e24dcca9e";
 static NimBLECharacteristic *bleStateChr = nullptr;
 static volatile int  bleClients = 0;
 static volatile bool bleNeedFull = false;
@@ -248,18 +251,25 @@ static int wifiStateCode() {
 }
 
 class BleCmdCb : public NimBLECharacteristicCallbacks {
+    bool secure;
+public:
+    explicit BleCmdCb(bool sec) : secure(sec) {}
     void onWrite(NimBLECharacteristic *c, NimBLEConnInfo &info) override {
         NimBLEAttValue v = c->getValue();
-        StaticJsonDocument<256> d;
+        StaticJsonDocument<320> d;
         if (deserializeJson(d, (const char *)v.data(), v.size())) return;
         const char *cmd = d["cmd"] | "";
-        if (!strcmp(cmd, "tare")) pendTare = true;
-        else if (!strcmp(cmd, "calibrate")) {
-            float g = d["grams"] | 0.0f;
-            if (g > 0) pendCalGrams = g;
-        } else if (!strcmp(cmd, "wifi_scan")) {
-            pendScan = true;
-        } else if (!strcmp(cmd, "wifi")) {
+        if (!secure) {
+            if (!strcmp(cmd, "tare")) pendTare = true;
+            else if (!strcmp(cmd, "calibrate")) {
+                float g = d["grams"] | 0.0f;
+                if (g > 0) pendCalGrams = g;
+            } else if (!strcmp(cmd, "wifi_scan")) {
+                pendScan = true;
+            }
+            return;
+        }
+        if (!strcmp(cmd, "wifi")) {
             // Anyone in Bluetooth range could otherwise repoint the scale. Allow it
             // when the scale has no Wi-Fi (first setup) or BOOT was pressed in the
             // last 30 s (physical presence).
@@ -270,6 +280,16 @@ class BleCmdCb : public NimBLECharacteristicCallbacks {
             pendSsid = ssid;
             pendPass = String((const char *)(d["pass"] | ""));
             pendWifi = true;
+        } else if (!strcmp(cmd, "fb_login")) {
+            // The cloud account belongs to whoever is paired, but replacing an existing
+            // session needs the same physical-presence proof as changing the network.
+            bool allowed = fbState() != FB_SIGNED_IN || (bootBtnMs && millis() - bootBtnMs < 30000);
+            if (!allowed) { bleSend("{\"fb_err\":\"boot\"}"); return; }
+            const char *email = d["email"] | "";
+            const char *pass = d["pass"] | "";
+            if (*email && *pass) fbLogin(email, pass);
+        } else if (!strcmp(cmd, "fb_logout")) {
+            fbLogout();
         }
     }
 };
@@ -277,13 +297,19 @@ class BleCmdCb : public NimBLECharacteristicCallbacks {
 static void setupBle() {
     NimBLEDevice::init(mdnsName.c_str());
     NimBLEDevice::setMTU(185);
+    // LE Secure Connections, "Just Works" pairing (no display or keys on this board):
+    // encrypts the link against passive eavesdropping, and bonds so it happens once.
+    NimBLEDevice::setSecurityAuth(true, false, true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
     NimBLEServer *srv = NimBLEDevice::createServer();
     srv->setCallbacks(new BleServerCb());
     NimBLEService *svc = srv->createService(BLE_SVC);
     bleStateChr = svc->createCharacteristic(BLE_STATE, NIMBLE_PROPERTY::NOTIFY);
     bleStateChr->setCallbacks(new BleStateCb());
     NimBLECharacteristic *cmd = svc->createCharacteristic(BLE_CMD, NIMBLE_PROPERTY::WRITE);
-    cmd->setCallbacks(new BleCmdCb());
+    cmd->setCallbacks(new BleCmdCb(false));
+    NimBLECharacteristic *sec = svc->createCharacteristic(BLE_SEC, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC);
+    sec->setCallbacks(new BleCmdCb(true));
     svc->start();
     NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
     adv->setName(mdnsName.c_str());
@@ -313,6 +339,18 @@ static void pumpBle(bool periodicFull) {
     putField<int>(d, "wst", wst, lWst, full);
     if (full) d["calibrationFactor"] = calFactor;
     if (d.size()) { String out; serializeJson(d, out); bleSend(out); }
+
+    // Cloud account state, same delta rule.
+    StaticJsonDocument<192> fb;
+    static int lFbs = -1;
+    static String lFbe, lFbn, lFber;
+    int fbs = fbState();
+    String fbe = fbEmail(), fbn = fbDisplayName(), fber = fbErrorText();
+    putField<int>(fb, "fbs", fbs, lFbs, full);
+    putField<String>(fb, "fbe", fbe, lFbe, full);
+    putField<String>(fb, "fbn", fbn, lFbn, full);
+    putField<String>(fb, "fber", fber, lFber, full);
+    if (fb.size()) { String out; serializeJson(fb, out); bleSend(out); }
 }
 
 // Scans for networks and sends the strongest few over BLE (fits one notification).
@@ -363,6 +401,7 @@ static void sendStatusJson(AsyncWebServerRequest *r) {
     d["reader_ok"] = reader.ok; d["calibrationFactor"] = calFactor;
     d["uptime_s"] = millis() / 1000; d["fw_version"] = FW_VERSION;
     d["wifi_signal_dbm"] = (int)WiFi.RSSI();
+    d["firebaseAuth"] = fbState() == FB_SIGNED_IN; d["firebaseEmail"] = fbEmail();
     String out; serializeJson(d, out);
     r->send(200, "application/json", out);
 }
@@ -448,6 +487,11 @@ void setup() {
     setupBle();
     WiFi.begin();
 
+    {
+        char macHex[13];
+        snprintf(macHex, sizeof macHex, "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        fbBegin(macHex);
+    }
     setupRoutes();
     server.begin();
 }
@@ -475,6 +519,16 @@ void loop() {
         if (MDNS.begin(mdnsName.c_str())) { MDNS.addService("http", "tcp", 80); mdnsOn = true; }
     } else if (WiFi.status() != WL_CONNECTED) {
         mdnsOn = false;
+    }
+
+    static uint32_t lastFbPub = 0;
+    if (millis() - lastFbPub >= 1000) {
+        lastFbPub = millis();
+        FbSnapshot fs;
+        fs.weight = shownWeight; fs.uid = uid; fs.cal = calFactor; fs.rssi = (int)WiFi.RSSI();
+        fs.ip = WiFi.localIP().toString(); fs.mdns = mdnsName + ".local"; fs.fw = FW_VERSION;
+        fs.readerOk = reader.ok; fs.scaleOk = scaleOk; fs.status = scaleStatus;
+        fbPublish(fs);
     }
 
     updateScale();

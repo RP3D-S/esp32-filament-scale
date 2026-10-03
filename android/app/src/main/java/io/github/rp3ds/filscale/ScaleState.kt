@@ -21,6 +21,12 @@ data class ScaleState(
     val wifiState: Int = 0,
     val networks: List<String> = emptyList(),
     val wifiNeedsBoot: Boolean = false,
+    /** 0 signed out, 1 busy, 2 signed in, 3 error (TigerTag cloud account on the scale) */
+    val fbState: Int = 0,
+    val fbEmail: String = "",
+    val fbName: String = "",
+    val fbError: String = "",
+    val fbNeedsBoot: Boolean = false,
     val searching: Boolean = false,
     val message: String? = null,
 ) {
@@ -44,5 +50,10 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     ssid = if (j.has("ssid")) j.optString("ssid") else ssid,
     wifiState = if (j.has("wst")) j.optInt("wst") else wifiState,
     networks = j.optJSONArray("networks")?.let { a -> List(a.length()) { a.getString(it) } } ?: networks,
+    fbState = if (j.has("fbs")) j.optInt("fbs") else fbState,
+    fbEmail = if (j.has("fbe")) j.optString("fbe") else fbEmail,
+    fbName = if (j.has("fbn")) j.optString("fbn") else fbName,
+    fbError = if (j.has("fber")) j.optString("fber") else fbError,
+    fbNeedsBoot = if (j.has("fb_err")) true else if (j.has("fbs")) false else fbNeedsBoot,
     wifiNeedsBoot = if (j.has("wifi_err")) true else if (j.has("wst")) false else wifiNeedsBoot,
 )

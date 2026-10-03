@@ -75,6 +75,8 @@ class MainActivity : ComponentActivity() {
                         onSearch = vm::search,
                         onScanWifi = vm::scanWifi,
                         onWifi = vm::configureWifi,
+                        onFbLogin = vm::loginFirebase,
+                        onFbLogout = vm::logoutFirebase,
                     )
                 }
             }
@@ -91,6 +93,8 @@ fun ScaleScreen(
     onSearch: () -> Unit,
     onScanWifi: () -> Unit,
     onWifi: (String, String) -> Unit,
+    onFbLogin: (String, String) -> Unit,
+    onFbLogout: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
 
@@ -105,7 +109,7 @@ fun ScaleScreen(
     }
 
     if (showSettings) {
-        SettingsDialog(s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi)
+        SettingsDialog(s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout)
     }
 }
 
@@ -118,10 +122,13 @@ private fun SettingsDialog(
     onSearch: () -> Unit,
     onScanWifi: () -> Unit,
     onWifi: (String, String) -> Unit,
+    onFbLogin: (String, String) -> Unit,
+    onFbLogout: () -> Unit,
 ) {
     var showCal by remember { mutableStateOf(false) }
     var showHost by remember { mutableStateOf(false) }
     var showWifi by remember { mutableStateOf(false) }
+    var showFb by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -144,6 +151,17 @@ private fun SettingsDialog(
                         },
                     )
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Conta TigerTag: ", fontWeight = FontWeight.Medium)
+                    Text(
+                        when (s.fbState) {
+                            2 -> s.fbEmail.ifBlank { "ligada" }
+                            1 -> "a ligar…"
+                            3 -> "erro"
+                            else -> "sem conta"
+                        },
+                    )
+                }
                 Text(
                     "Leitor NFC: ${if (s.readerOk) "OK" else "não detetado"} · " +
                         "Célula de carga: ${if (s.scaleOk) "OK" else "sem resposta"}",
@@ -160,6 +178,9 @@ private fun SettingsDialog(
                     enabled = s.bleLinked,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Configurar Wi-Fi da balança") }
+                OutlinedButton(onClick = { showFb = true }, enabled = s.bleLinked, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (s.fbState == 2) "Conta TigerTag" else "Ligar conta TigerTag")
+                }
                 OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
                     Text("Calibrar")
                 }
@@ -173,6 +194,7 @@ private fun SettingsDialog(
     )
 
     if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
+    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
     if (showCal) CalibrateDialog({ showCal = false }) { onCalibrate(it); showCal = false }
 }
@@ -228,6 +250,67 @@ private fun WifiDialog(
             }
         },
         confirmButton = { TextButton(onClick = { if (ssid.isNotBlank()) onOk(ssid, pass) }) { Text("Ligar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+    )
+}
+
+/** Signs the scale in to the TigerTag cloud. The password is sent once over the encrypted link and never stored. */
+@Composable
+private fun FirebaseDialog(
+    s: ScaleState,
+    onDismiss: () -> Unit,
+    onLogin: (String, String) -> Unit,
+    onLogout: () -> Unit,
+) {
+    var email by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Conta TigerTag") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (s.fbState == 2) {
+                    Text("Ligada como ${s.fbName.ifBlank { s.fbEmail }}", color = Color(0xFF3BA55D))
+                    Text(s.fbEmail, fontSize = 13.sp, color = Color(0xFF8A93A6))
+                    Text("A balança envia o peso e o estado para a tua conta de 30 em 30 segundos.", fontSize = 13.sp)
+                } else {
+                    Text(
+                        "Email e palavra-passe da tua conta TigerTag. Contas criadas só com Google não têm palavra-passe.",
+                        fontSize = 13.sp,
+                    )
+                    OutlinedTextField(
+                        value = email, onValueChange = { email = it }, singleLine = true,
+                        label = { Text("Email") },
+                    )
+                    OutlinedTextField(
+                        value = pass, onValueChange = { pass = it }, singleLine = true,
+                        label = { Text("Palavra-passe") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    Text(
+                        "Na primeira vez o Android pede para emparelhar com a balança; aceita.",
+                        fontSize = 12.sp, color = Color(0xFF8A93A6),
+                    )
+                }
+                if (s.fbNeedsBoot) {
+                    Text(
+                        "A balança já tem uma conta. Carrega no botão BOOT do ESP32 e tenta outra vez (30 s).",
+                        color = Color(0xFFE8821E), fontSize = 13.sp,
+                    )
+                }
+                when (s.fbState) {
+                    1 -> Text("A ligar…", color = Color(0xFF2F7FFF))
+                    3 -> Text(s.fbError.ifBlank { "Não foi possível ligar." }, color = Color(0xFFE24B4A))
+                }
+            }
+        },
+        confirmButton = {
+            if (s.fbState == 2) {
+                TextButton(onClick = { onLogout(); onDismiss() }) { Text("Terminar sessão") }
+            } else {
+                TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) onLogin(email.trim(), pass) }) { Text("Ligar") }
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
     )
 }

@@ -12,11 +12,15 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.util.UUID
 
@@ -35,6 +39,8 @@ class ScaleBle(
         val SERVICE: UUID = UUID.fromString("6e5f0001-b5a3-f393-e0a9-e50e24dcca9e")
         val STATE: UUID = UUID.fromString("6e5f0002-b5a3-f393-e0a9-e50e24dcca9e")
         val CMD: UUID = UUID.fromString("6e5f0003-b5a3-f393-e0a9-e50e24dcca9e")
+        /** Needs a paired (encrypted) link: Wi-Fi and account passwords go through here. */
+        val SECURE: UUID = UUID.fromString("6e5f0004-b5a3-f393-e0a9-e50e24dcca9e")
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val MTU = 185   // must match NimBLEDevice::setMTU on the firmware
     }
@@ -45,6 +51,8 @@ class ScaleBle(
 
     private var gatt: BluetoothGatt? = null
     private var cmdChar: BluetoothGattCharacteristic? = null
+    private var secChar: BluetoothGattCharacteristic? = null
+    private var pendingSecure: String? = null
     private var scanning = false
     private var wanted = false
 
@@ -69,6 +77,7 @@ class ScaleBle(
                 if (g === gatt) {
                     gatt = null
                     cmdChar = null
+                    secChar = null
                     linked(false)
                     retryLater()
                 }
@@ -83,6 +92,7 @@ class ScaleBle(
             val svc = g.getService(SERVICE)
             val state = svc?.getCharacteristic(STATE)
             cmdChar = svc?.getCharacteristic(CMD)
+            secChar = svc?.getCharacteristic(SECURE)
             if (state == null) {
                 g.disconnect()
                 return
@@ -142,6 +152,7 @@ class ScaleBle(
         gatt?.let { it.disconnect(); it.close() }
         gatt = null
         cmdChar = null
+        secChar = null
         linked(false)
     }
 
@@ -163,9 +174,43 @@ class ScaleBle(
     val isLinked: Boolean get() = gatt != null && cmdChar != null
 
     /** Sends {"cmd":...} to the scale; false when the link is not ready. */
-    fun send(json: String): Boolean {
+    fun send(json: String): Boolean = write(cmdChar, json)
+
+    /**
+     * Same, on the encrypted characteristic. The first use bonds with the scale ("Just Works"
+     * pairing, Android shows its own prompt); the message is held and sent once bonded.
+     */
+    fun sendSecure(json: String): Boolean {
         val g = gatt ?: return false
-        val c = cmdChar ?: return false
+        if (secChar == null) return false
+        if (g.device.bondState != BluetoothDevice.BOND_BONDED) {
+            pendingSecure = json
+            if (g.device.createBond()) return true
+        }
+        return write(secChar, json)
+    }
+
+    private val bondReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1)
+            if (state == BluetoothDevice.BOND_BONDED) {
+                pendingSecure?.let { pendingSecure = null; write(secChar, it) }
+            } else if (state == BluetoothDevice.BOND_NONE) {
+                pendingSecure = null
+            }
+        }
+    }
+
+    init {
+        ContextCompat.registerReceiver(
+            ctx, bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    private fun write(c: BluetoothGattCharacteristic?, json: String): Boolean {
+        val g = gatt ?: return false
+        c ?: return false
         val bytes = json.toByteArray(Charsets.UTF_8)
         return if (Build.VERSION.SDK_INT >= 33) {
             g.writeCharacteristic(c, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
