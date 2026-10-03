@@ -43,12 +43,12 @@ cloud/WS sections from upstream, with:
 - phone UI = the existing PWA, plus a live weight/status view over WebSocket
 
 ## Steps
-1. [ ] New `platformio.ini` env + 4 MB partitions
-2. [ ] Skeleton firmware: Wi-Fi (WiFiManager), LittleFS, web server, WebSocket
-3. [ ] HX711 scale: tare, calibration, filtering
-4. [ ] 2x PN532 over HSU, tag read
-5. [ ] Weigh state machine + servo
-6. [ ] Phone UI: live weight, tag info, tare/calibrate buttons
+1. [x] New `firmware/platformio.ini` env + 4 MB partitions (written, not compiled)
+2. [x] Skeleton firmware: Wi-Fi portal, web server, WebSocket (written, not compiled)
+3. [x] HX711 scale: tare, calibration, filtering (written)
+4. [x] 2x PN532 over HSU, UID read (written; TigerTag page decoding + cloud still to port)
+5. [~] Servo scan done; full weigh workflow/cloud send not ported
+6. [x] Android app in `android/` (written, not compiled)
 7. [ ] Bench test on hardware
 
 Upstream: https://github.com/TigerTag-Project/Tiger-Scale-V3 (MIT). Per upstream's
