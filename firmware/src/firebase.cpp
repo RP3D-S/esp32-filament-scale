@@ -26,6 +26,7 @@ static String gEmail, gName, gError;
 static String gUid, gIdToken, gRefresh;
 static String gColor;                     // account colour as RRGGBB (the original draws initials on it)
 static bool gProfileDocDone = false;
+static bool gProfilePhotoDone = false;
 static String gAvatar;                    // avatar URL of the signed-in account
 static bool gNeedProfile = false;         // fetch name + avatar once per session
 static int gProfileTries = 0;
@@ -55,6 +56,7 @@ static void clearSession() {
     p.end();
     gUid = gIdToken = gRefresh = gEmail = gName = gAvatar = gColor = "";
     gProfileDocDone = false;
+    gProfilePhotoDone = false;
 }
 
 // TLS with the certificate bundle built into the Arduino core, so the server is verified.
@@ -135,6 +137,8 @@ static bool signIn(const String &email, const String &pass) {
     gEmail = email;
     gTokenMs = millis();
     if (gIdToken.isEmpty() || gUid.isEmpty()) { gError = "Resposta inválida"; return false; }
+    gAvatar = gColor = "";
+    gProfileDocDone = gProfilePhotoDone = false;
     saveSession();
     gNeedProfile = true;
     gProfileTries = 0;
@@ -172,6 +176,7 @@ class ProfileScanner : public Stream {
 public:
     String line, lastKey, avatar, avatarKey, name, keys;
     int cr = -1, cg = -1, cb = -1;
+    String colorHex;
     size_t write(uint8_t c) override {
         if (c == '\n') { process(); line = ""; }
         else if (c != '\r' && line.length() < 700) line += (char)c;
@@ -207,6 +212,7 @@ private:
         v = v.substring(1, v.length() - 1);
         String kl = lastKey; kl.toLowerCase();
         if (kl == "displayname") name = unescapeJson(v);
+        if (kl == "color" && v.length() == 7 && v[0] == '#') colorHex = v.substring(1);
         bool avatarish = kl.indexOf("avatar") >= 0 || kl.indexOf("photo") >= 0 || kl.indexOf("picture") >= 0 ||
                          kl.indexOf("image") >= 0 || kl.indexOf("pic") >= 0;
         if (v.startsWith("http") && avatarish && (avatar.isEmpty() || kl.indexOf("avatar") >= 0)) {
@@ -244,20 +250,41 @@ static bool fetchProfile() {
             snprintf(hex, sizeof hex, "%02X%02X%02X", constrain(sc.cr, 0, 255), constrain(sc.cg, 0, 255), constrain(sc.cb, 0, 255));
             gColor = hex;
         }
-        if (sc.avatar.length()) { gAvatar = sc.avatar; Serial.printf("[FB] avatar from field '%s'\n", sc.avatarKey.c_str()); }
         gProfileDocDone = true;
         saveSession();
     }
 
-    // Phase 2: the Auth profile photo (set when the account is linked to Google).
-    if (gAvatar.isEmpty()) {
-        String resp;
-        String lu = String("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=") + API_KEY;
-        int code = request("POST", lu, String("{\"idToken\":\"") + gIdToken + "\"}", "application/json", "", resp);
-        if (code != 200) { Serial.printf("[FB] lookup HTTP %d\n", code); return false; }
-        String photo = unescapeJson(extractStr(resp, "photoUrl"));
-        if (photo.length()) { gAvatar = photo; Serial.println("[FB] avatar from Auth photoUrl"); }
-        else Serial.println("[FB] no photo on this account, colour initials only");
+    // Phase 2: userProfiles/{uid}. Tiger Studio Manager takes the avatar photo only from
+    // `photoURL` here (a Firebase Storage URL) and the colour from `color`; it never uses
+    // the Google-CDN photo from Firebase Auth, so neither do we.
+    if (!gProfilePhotoDone) {
+        ProfileScanner sc;
+        int code;
+        {
+            WiFiClientSecure client;
+            client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
+            HTTPClient http;
+            http.setTimeout(10000);
+            String url = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/userProfiles/" + gUid +
+                         "?mask.fieldPaths=photoURL&mask.fieldPaths=color&mask.fieldPaths=displayName";
+            if (!http.begin(client, url)) return false;
+            http.addHeader("Authorization", "Bearer " + gIdToken);
+            code = http.GET();
+            if (code == 200) http.writeToStream(&sc);
+            http.end();
+        }
+        if (code == 404) {
+            gAvatar = "";            // no public profile document: initials only
+        } else if (code != 200) {
+            Serial.printf("[FB] userProfiles HTTP %d\n", code);
+            return false;
+        } else {
+            gAvatar = sc.avatar;
+            if (sc.colorHex.length() == 6) gColor = sc.colorHex;
+            if (sc.name.length() && gName.isEmpty()) gName = sc.name;
+        }
+        Serial.printf("[FB] avatar: %s\n", gAvatar.length() ? gAvatar.c_str() : "(none, initials on colour)");
+        gProfilePhotoDone = true;
         saveSession();
     }
     return true;
@@ -404,7 +431,6 @@ void fbBegin(const String &mac) {
     gUid = p.getString("uid", "");
     gEmail = p.getString("email", "");
     gName = p.getString("name", "");
-    gAvatar = p.getString("avatar", "");
     gColor = p.getString("color", "");
     p.end();
     gNeedProfile = gRefresh.length() > 0;

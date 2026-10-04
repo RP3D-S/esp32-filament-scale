@@ -6,7 +6,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
@@ -313,23 +315,46 @@ private fun GearIcon(modifier: Modifier) {
     }
 }
 
-/** The account photo when there is one, otherwise the initials on the account's colour (as on the original). */
+/**
+ * Same avatar as Tiger Studio Manager: the account photo when there is one, otherwise the
+ * initials on a 135 degree gradient of the account colour (the colour mixed 38 % towards white).
+ * Initials come strictly from the display name (never the email): two words give the first
+ * letter of each, one word gives its first two characters, accents are kept.
+ */
 @Composable
 private fun Avatar(s: ScaleState, size: Dp, fontSize: TextUnit) {
     val photo by produceState<Bitmap?>(null, s.avatarUrl) {
         value = if (s.avatarUrl.isBlank()) null else AvatarLoader.load(s.avatarUrl)
     }
-    val bg = runCatching { Color(android.graphics.Color.parseColor("#" + s.avatarColor)) }.getOrDefault(ACCENT)
-    val name = s.fbName.ifBlank { s.fbEmail }
-    val initials = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-        .let { w -> if (w.size >= 2) "" + w.first().first() + w.last().first() else w.firstOrNull()?.take(1) ?: "?" }
-        .uppercase()
-    Box(Modifier.size(size).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+    val base = runCatching { android.graphics.Color.parseColor("#" + s.avatarColor) }.getOrNull()
+    val c1 = base?.let { Color(it) } ?: ACCENT
+    val c2 = base?.let { c ->
+        fun mix(v: Int) = (v + Math.round((255 - v) * 0.38f)).coerceAtMost(255)
+        Color(mix(android.graphics.Color.red(c)), mix(android.graphics.Color.green(c)), mix(android.graphics.Color.blue(c)))
+    } ?: ACCENT
+    // Studio switches to dark letters on a light colour so the initials stay legible.
+    val dark = c1.luminance() > 0.6f
+    val initials = avatarInitials(s.fbName)
+    Box(
+        Modifier.size(size).clip(CircleShape).background(
+            Brush.linearGradient(listOf(c1, c2), start = Offset(0f, 0f), end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)),
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
         val b = photo
         if (b != null) {
             Image(b.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else {
-            Text(initials, color = TEXT, fontSize = fontSize, fontWeight = FontWeight.Bold)
+        } else if (initials.isNotEmpty()) {
+            Text(initials, color = if (dark) Color(0xFF111111) else TEXT, fontSize = fontSize, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+private fun avatarInitials(displayName: String): String {
+    val clean = displayName.trim().replace(Regex("[^\\p{L}\\p{N}\\s]"), "").replace(Regex("\\s+"), " ").trim()
+    if (clean.isEmpty()) return ""
+    val words = clean.split(" ")
+    val cps = { w: String -> w.codePoints().toArray().map { String(Character.toChars(it)) } }
+    return if (words.size >= 2) (cps(words[0]).first() + cps(words[1]).first()).uppercase()
+    else cps(words[0]).take(2).joinToString("").uppercase()
 }
