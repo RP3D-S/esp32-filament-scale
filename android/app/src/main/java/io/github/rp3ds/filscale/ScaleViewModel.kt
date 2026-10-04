@@ -17,6 +17,8 @@ import org.json.JSONObject
  * prefer Wi-Fi and fall back to BLE, so the app keeps working when either link drops.
  */
 class ScaleViewModel(app: Application) : AndroidViewModel(app) {
+    private fun str(id: Int, vararg a: Any): String = getApplication<Application>().getString(id, *a)
+
     private val prefs = app.getSharedPreferences("filscale", 0)
 
     private val _state = MutableStateFlow(ScaleState(host = prefs.getString("host", "") ?: ""))
@@ -103,7 +105,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     fun scanWifi() {
         _state.update { it.copy(networks = emptyList()) }
         if (!ble.send("""{"cmd":"wifi_scan"}""")) {
-            _state.update { it.copy(message = "Liga-te primeiro por Bluetooth") }
+            _state.update { it.copy(message = str(R.string.msg_bt_first)) }
         }
     }
 
@@ -111,14 +113,14 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     fun configureWifi(ssid: String, pass: String) {
         val body = org.json.JSONObject().put("cmd", "wifi").put("ssid", ssid).put("pass", pass).toString()
         _state.update { it.copy(wifiNeedsBoot = false, wifiState = 1) }
-        if (!ble.sendSecure(body)) _state.update { it.copy(message = "Liga-te primeiro por Bluetooth", wifiState = 0) }
+        if (!ble.sendSecure(body)) _state.update { it.copy(message = str(R.string.msg_bt_first), wifiState = 0) }
     }
 
     /** Signs the scale in to the TigerTag cloud. Goes over the encrypted BLE characteristic. */
     fun loginFirebase(email: String, password: String) {
         val body = JSONObject().put("cmd", "fb_login").put("email", email).put("pass", password).toString()
         _state.update { it.copy(fbNeedsBoot = false, fbError = "", fbState = 1) }
-        if (!ble.sendSecure(body)) _state.update { it.copy(message = "Liga-te primeiro por Bluetooth", fbState = 0) }
+        if (!ble.sendSecure(body)) _state.update { it.copy(message = str(R.string.msg_bt_first), fbState = 0) }
     }
 
     fun logoutFirebase() {
@@ -144,10 +146,10 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         when {
             s.wifiLinked && s.host.isNotBlank() ->
                 client.post(s.host, path, httpBody) { ok ->
-                    if (!ok && !ble.send(bleBody)) _state.update { it.copy(message = "Falha: $path") }
+                    if (!ok && !ble.send(bleBody)) _state.update { it.copy(message = str(R.string.msg_failed, path)) }
                 }
             ble.send(bleBody) -> Unit
-            else -> _state.update { it.copy(message = "Sem ligação à balança") }
+            else -> _state.update { it.copy(message = str(R.string.msg_no_link)) }
         }
     }
 

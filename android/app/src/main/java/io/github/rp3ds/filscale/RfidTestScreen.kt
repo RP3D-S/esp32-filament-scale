@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -74,7 +75,7 @@ fun RfidTestScreen(
                 }
 
                 // ---- Power stepper ----
-                Text("POTÊNCIA RFID", color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(6f), d(52f)))
+                Text(stringResource(R.string.rfid_power), color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(6f), d(52f)))
                 StepButton("-", enabled = s.rfPow > 0, k = k, x = 6f, y = 68f) { onPower(s.rfPow - 1) }
                 Box(
                     Modifier
@@ -87,7 +88,7 @@ fun RfidTestScreen(
 
                 // ---- Reader pill (one reader on this scale) ----
                 Text(
-                    "LEITORES RFID", color = MUTED, fontSize = f(14f), textAlign = TextAlign.End,
+                    stringResource(R.string.rfid_readers), color = MUTED, fontSize = f(14f), textAlign = TextAlign.End,
                     modifier = Modifier.offset(d(480f - 6f - 130f), d(52f)).width(d(130f)),
                 )
                 Box(
@@ -99,7 +100,7 @@ fun RfidTestScreen(
                 ) { Text("1", color = TEXT, fontSize = f(16f)) }
 
                 // ---- UID box + PN532 version box ----
-                InfoBox(k, x = 6f, title = "LEITOR", value = s.rfUid.ifEmpty { "-" }, green = s.rfUid.isNotEmpty())
+                InfoBox(k, x = 6f, title = stringResource(R.string.rfid_reader), value = s.rfUid.ifEmpty { "-" }, green = s.rfUid.isNotEmpty())
                 InfoBox(k, x = 246f, title = "PN532", value = s.rfVer.ifEmpty { "-" }, green = false)
 
                 // ---- Scan / Stop ----
@@ -111,7 +112,7 @@ fun RfidTestScreen(
                         .border(d(1f), BORDER, RoundedCornerShape(d(12f)))
                         .clickable { onScan(!s.rfTest) },
                     contentAlignment = Alignment.Center,
-                ) { Text(if (s.rfTest) "Parar" else "Procurar", color = TEXT, fontSize = f(16f)) }
+                ) { Text(stringResource(if (s.rfTest) R.string.stop else R.string.scan), color = TEXT, fontSize = f(16f)) }
             }
         }
     }

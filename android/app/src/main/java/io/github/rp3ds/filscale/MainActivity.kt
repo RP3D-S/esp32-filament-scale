@@ -2,7 +2,9 @@ package io.github.rp3ds.filscale
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.LocaleManager
 import android.os.Build
+import android.os.LocaleList
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -34,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -136,47 +140,51 @@ private fun SettingsDialog(
     var showWifi by remember { mutableStateOf(false) }
     var showFb by remember { mutableStateOf(false) }
     var showRfid by remember { mutableStateOf(false) }
+    var showLang by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Definições") },
+        title = { Text(stringResource(R.string.settings)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Bluetooth: ", fontWeight = FontWeight.Medium)
-                    Text(if (s.bleLinked) "ligado" else "à procura da balança…")
+                    Text(stringResource(R.string.label_bluetooth), fontWeight = FontWeight.Medium)
+                    Text(stringResource(if (s.bleLinked) R.string.status_connected else R.string.status_searching_scale))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Wi-Fi: ", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.label_wifi), fontWeight = FontWeight.Medium)
                     Text(
                         when {
-                            s.wifiLinked -> "ligado (${s.host})"
-                            s.wifiState == 2 -> "balança em ${s.ssid}, a ligar…"
-                            s.wifiState == 1 -> "a ligar a rede…"
-                            s.wifiState == 3 -> "falhou, verifica a palavra-passe"
-                            else -> "sem rede configurada"
+                            s.wifiLinked -> stringResource(R.string.status_wifi_linked, s.host)
+                            s.wifiState == 2 -> stringResource(R.string.status_wifi_scale_on, s.ssid)
+                            s.wifiState == 1 -> stringResource(R.string.status_wifi_connecting)
+                            s.wifiState == 3 -> stringResource(R.string.status_wifi_failed)
+                            else -> stringResource(R.string.status_wifi_none)
                         },
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Conta TigerTag: ", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.label_account), fontWeight = FontWeight.Medium)
                     Text(
                         when (s.fbState) {
-                            2 -> s.fbEmail.ifBlank { "ligada" }
-                            1 -> "a ligar…"
-                            3 -> "erro"
-                            else -> "sem conta"
+                            2 -> s.fbEmail.ifBlank { stringResource(R.string.status_connected) }
+                            1 -> stringResource(R.string.connecting)
+                            3 -> stringResource(R.string.badge_error)
+                            else -> stringResource(R.string.badge_no_account)
                         },
                     )
                 }
                 Text(
-                    "Leitor NFC: ${if (s.readerOk) "OK" else "não detetado"} · " +
-                        "Célula de carga: ${if (s.scaleOk) "OK" else "sem resposta"}",
+                    stringResource(
+                        R.string.hw_status,
+                        stringResource(if (s.readerOk) R.string.ok else R.string.not_detected),
+                        stringResource(if (s.scaleOk) R.string.ok else R.string.no_response),
+                    ),
                     fontSize = 12.sp, color = Color(0xFF8A93A6),
                 )
                 if (s.firmware.isNotEmpty()) {
                     Text(
-                        "Firmware ${s.firmware} · fator ${"%.2f".format(s.calibration)}",
+                        stringResource(R.string.firmware_line, s.firmware, "%.2f".format(s.calibration)),
                         fontSize = 12.sp, color = Color(0xFF8A93A6),
                     )
                 }
@@ -184,25 +192,31 @@ private fun SettingsDialog(
                     onClick = { onScanWifi(); showWifi = true },
                     enabled = s.bleLinked,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Configurar Wi-Fi da balança") }
+                ) { Text(stringResource(R.string.btn_configure_wifi)) }
                 OutlinedButton(onClick = { showFb = true }, enabled = s.bleLinked, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (s.fbState == 2) "Conta TigerTag" else "Ligar conta TigerTag")
+                    Text(stringResource(if (s.fbState == 2) R.string.acct_title else R.string.btn_connect_account))
                 }
                 OutlinedButton(onClick = { showRfid = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
-                    Text("Teste RFID")
+                    Text(stringResource(R.string.rfid_test))
                 }
                 OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
-                    Text("Calibrar")
+                    Text(stringResource(R.string.calibrate))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onSearch, enabled = !s.searching) { Text("Procurar") }
-                    OutlinedButton(onClick = { showHost = true }) { Text("IP manual") }
+                    OutlinedButton(onClick = onSearch, enabled = !s.searching) { Text(stringResource(R.string.btn_search)) }
+                    OutlinedButton(onClick = { showHost = true }) { Text(stringResource(R.string.btn_manual_ip)) }
+                }
+                if (Build.VERSION.SDK_INT >= 33) {
+                    OutlinedButton(onClick = { showLang = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.language))
+                    }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
 
+    if (showLang) LanguageDialog { showLang = false }
     if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
     if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
     if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
@@ -222,11 +236,11 @@ private fun WifiDialog(
     var pass by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Wi-Fi da balança") },
+        title = { Text(stringResource(R.string.wifi_title)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Redes que a balança vê (2,4 GHz):", fontSize = 13.sp)
-                if (s.networks.isEmpty()) Text("A procurar…", fontSize = 13.sp, color = Color(0xFF8A93A6))
+                Text(stringResource(R.string.wifi_networks), fontSize = 13.sp)
+                if (s.networks.isEmpty()) Text(stringResource(R.string.scanning), fontSize = 13.sp, color = Color(0xFF8A93A6))
                 s.networks.forEach { n ->
                     Text(
                         n,
@@ -237,31 +251,31 @@ private fun WifiDialog(
                             .padding(10.dp),
                     )
                 }
-                TextButton(onClick = onScan) { Text("Procurar de novo") }
+                TextButton(onClick = onScan) { Text(stringResource(R.string.btn_search_again)) }
                 OutlinedTextField(
                     value = ssid, onValueChange = { ssid = it }, singleLine = true,
-                    label = { Text("Nome da rede") },
+                    label = { Text(stringResource(R.string.wifi_network_name)) },
                 )
                 OutlinedTextField(
                     value = pass, onValueChange = { pass = it }, singleLine = true,
-                    label = { Text("Palavra-passe") },
+                    label = { Text(stringResource(R.string.password)) },
                     visualTransformation = PasswordVisualTransformation(),
                 )
                 if (s.wifiNeedsBoot) {
                     Text(
-                        "A balança já tem Wi-Fi. Carrega no botão BOOT do ESP32 e tenta outra vez (30 s).",
+                        stringResource(R.string.wifi_needs_boot),
                         color = Color(0xFFE8821E), fontSize = 13.sp,
                     )
                 }
                 when (s.wifiState) {
-                    1 -> Text("A ligar…", color = Color(0xFF2F7FFF))
-                    2 -> Text("Ligado a ${s.ssid} (${s.ip})", color = Color(0xFF3BA55D))
-                    3 -> Text("Não foi possível ligar. Verifica a palavra-passe.", color = Color(0xFFE24B4A))
+                    1 -> Text(stringResource(R.string.connecting), color = Color(0xFF2F7FFF))
+                    2 -> Text(stringResource(R.string.wifi_connected_to, s.ssid, s.ip), color = Color(0xFF3BA55D))
+                    3 -> Text(stringResource(R.string.wifi_cannot), color = Color(0xFFE24B4A))
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (ssid.isNotBlank()) onOk(ssid, pass) }) { Text("Ligar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        confirmButton = { TextButton(onClick = { if (ssid.isNotBlank()) onOk(ssid, pass) }) { Text(stringResource(R.string.btn_connect)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
 }
 
@@ -277,52 +291,52 @@ private fun FirebaseDialog(
     var pass by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Conta TigerTag") },
+        title = { Text(stringResource(R.string.acct_title)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (s.fbState == 2) {
-                    Text("Ligada como ${s.fbName.ifBlank { s.fbEmail }}", color = Color(0xFF3BA55D))
+                    Text(stringResource(R.string.acct_connected_as, s.fbName.ifBlank { s.fbEmail }), color = Color(0xFF3BA55D))
                     Text(s.fbEmail, fontSize = 13.sp, color = Color(0xFF8A93A6))
-                    Text("A balança envia o peso e o estado para a tua conta de 30 em 30 segundos.", fontSize = 13.sp)
+                    Text(stringResource(R.string.acct_sends), fontSize = 13.sp)
                 } else {
                     Text(
-                        "Email e palavra-passe da tua conta TigerTag. Contas criadas só com Google não têm palavra-passe.",
+                        stringResource(R.string.acct_intro),
                         fontSize = 13.sp,
                     )
                     OutlinedTextField(
                         value = email, onValueChange = { email = it }, singleLine = true,
-                        label = { Text("Email") },
+                        label = { Text(stringResource(R.string.email)) },
                     )
                     OutlinedTextField(
                         value = pass, onValueChange = { pass = it }, singleLine = true,
-                        label = { Text("Palavra-passe") },
+                        label = { Text(stringResource(R.string.password)) },
                         visualTransformation = PasswordVisualTransformation(),
                     )
                     Text(
-                        "Na primeira vez o Android pede para emparelhar com a balança; aceita.",
+                        stringResource(R.string.acct_pair_hint),
                         fontSize = 12.sp, color = Color(0xFF8A93A6),
                     )
                 }
                 if (s.fbNeedsBoot) {
                     Text(
-                        "A balança já tem uma conta. Carrega no botão BOOT do ESP32 e tenta outra vez (30 s).",
+                        stringResource(R.string.acct_needs_boot),
                         color = Color(0xFFE8821E), fontSize = 13.sp,
                     )
                 }
                 when (s.fbState) {
-                    1 -> Text("A ligar…", color = Color(0xFF2F7FFF))
-                    3 -> Text(s.fbError.ifBlank { "Não foi possível ligar." }, color = Color(0xFFE24B4A))
+                    1 -> Text(stringResource(R.string.connecting), color = Color(0xFF2F7FFF))
+                    3 -> Text(s.fbError.ifBlank { stringResource(R.string.acct_cannot) }, color = Color(0xFFE24B4A))
                 }
             }
         },
         confirmButton = {
             if (s.fbState == 2) {
-                TextButton(onClick = { onLogout(); onDismiss() }) { Text("Terminar sessão") }
+                TextButton(onClick = { onLogout(); onDismiss() }) { Text(stringResource(R.string.logout)) }
             } else {
-                TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) onLogin(email.trim(), pass) }) { Text("Ligar") }
+                TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) onLogin(email.trim(), pass) }) { Text(stringResource(R.string.btn_connect)) }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
 }
 
@@ -331,15 +345,15 @@ private fun HostDialog(current: String, onDismiss: () -> Unit, onOk: (String) ->
     var text by remember { mutableStateOf(current) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Endereço da balança") },
+        title = { Text(stringResource(R.string.host_title)) },
         text = {
             OutlinedTextField(
                 value = text, onValueChange = { text = it }, singleLine = true,
-                label = { Text("IP ou nome (ex.: 192.168.1.50)") },
+                label = { Text(stringResource(R.string.host_hint)) },
             )
         },
-        confirmButton = { TextButton(onClick = { onOk(text) }) { Text("Ligar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        confirmButton = { TextButton(onClick = { onOk(text) }) { Text(stringResource(R.string.btn_connect)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -348,24 +362,70 @@ private fun CalibrateDialog(onDismiss: () -> Unit, onOk: (Float) -> Unit) {
     var text by remember { mutableStateOf("500") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Calibrar") },
+        title = { Text(stringResource(R.string.calibrate)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "1. Retira tudo da balança e faz a tara.\n2. Coloca um peso conhecido.\n3. Indica o peso e confirma.",
+                    stringResource(R.string.cal_steps),
                     fontSize = 13.sp,
                 )
                 OutlinedTextField(
                     value = text, onValueChange = { text = it }, singleLine = true,
-                    label = { Text("Peso conhecido (g)") },
+                    label = { Text(stringResource(R.string.cal_weight)) },
                 )
             }
         },
         confirmButton = {
             TextButton(onClick = { text.replace(',', '.').toFloatOrNull()?.takeIf { it > 0 }?.let(onOk) }) {
-                Text("Calibrar")
+                Text(stringResource(R.string.calibrate))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/** In-app language, independent of the phone's (Android 13+ per-app locales; same nine as the scale). */
+@Composable
+private fun LanguageDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val options = listOf(
+        "" to stringResource(R.string.language_system),
+        "en" to "English",
+        "pt-PT" to "Português (Portugal)",
+        "pt-BR" to "Português (Brasil)",
+        "fr" to "Français",
+        "es" to "Español",
+        "de" to "Deutsch",
+        "it" to "Italiano",
+        "pl" to "Polski",
+        "zh" to "中文",
+    )
+    val current = if (Build.VERSION.SDK_INT >= 33) {
+        ctx.getSystemService(LocaleManager::class.java).applicationLocales.toLanguageTags()
+    } else ""
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.language)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                options.forEach { (tag, label) ->
+                    Text(
+                        label,
+                        Modifier
+                            .fillMaxWidth()
+                            .background(if (tag == current) Color(0xFF2F7FFF) else Color.Transparent)
+                            .clickable {
+                                if (Build.VERSION.SDK_INT >= 33) {
+                                    ctx.getSystemService(LocaleManager::class.java).applicationLocales =
+                                        LocaleList.forLanguageTags(tag)
+                                }
+                                onDismiss()
+                            }
+                            .padding(12.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
 }

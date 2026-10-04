@@ -389,12 +389,38 @@ static void setupBle() {
 
 static FrameState bleNetState;   // separate frame: network facts that would not fit the MTU
 
+// Several notifications queued back to back overflow the controller's buffers and the last
+// ones are dropped, so frames wait in a small queue and go out one per pass (every 100 ms).
+static String bleQueue[12];
+static int bleQueued = 0;
+
+static void bleEnqueue(const String &json) {
+    if (json.isEmpty()) return;
+    if (bleQueued == 12) {                       // full: drop the oldest, newer state wins
+        for (int i = 1; i < 12; i++) bleQueue[i - 1] = bleQueue[i];
+        bleQueued--;
+    }
+    bleQueue[bleQueued++] = json;
+}
+
+static void bleFlushOne() {
+    if (!bleQueued) return;
+    bleSend(bleQueue[0]);
+    for (int i = 1; i < bleQueued; i++) bleQueue[i - 1] = bleQueue[i];
+    bleQueue[--bleQueued] = "";
+}
+
 static void pumpBle(bool periodicFull) {
-    if (!bleStateChr || bleClients == 0) { bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); return; }
+    if (!bleStateChr || bleClients == 0) {
+        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState();
+        for (int i = 0; i < bleQueued; i++) bleQueue[i] = "";
+        bleQueued = 0;
+        return;
+    }
     bool full = periodicFull || bleNeedFull;
     bleNeedFull = false;
-    bleSend(buildFrame(full, bleState, true));
-    bleSend(buildRfFrame(full, bleRf));
+    bleEnqueue(buildFrame(full, bleState, true));
+    bleEnqueue(buildRfFrame(full, bleRf));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -407,7 +433,7 @@ static void pumpBle(bool periodicFull) {
     putField<String>(d, "ip", ip, lIp, full);
     putField<int>(d, "wst", wst, lWst, full);
     if (full) d["calibrationFactor"] = calFactor;
-    if (d.size()) { String out; serializeJson(d, out); bleSend(out); }
+    if (d.size()) { String out; serializeJson(d, out); bleEnqueue(out); }
 
     // Cloud account state, same delta rule.
     StaticJsonDocument<192> fb;
@@ -419,7 +445,9 @@ static void pumpBle(bool periodicFull) {
     putField<String>(fb, "fbe", fbe, lFbe, full);
     putField<String>(fb, "fbn", fbn, lFbn, full);
     putField<String>(fb, "fber", fber, lFber, full);
-    if (fb.size()) { String out; serializeJson(fb, out); bleSend(out); }
+    if (fb.size()) { String out; serializeJson(fb, out); bleEnqueue(out); }
+
+    bleFlushOne();
 }
 
 // Scans for networks and sends the strongest few over BLE (fits one notification).

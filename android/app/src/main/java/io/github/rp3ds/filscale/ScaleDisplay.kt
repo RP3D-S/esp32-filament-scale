@@ -1,5 +1,6 @@
 package io.github.rp3ds.filscale
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -53,17 +55,17 @@ private val ACCENT = Color(0xFF2F7FFF)
 private val RED = Color(0xFFE24B4A)
 private val GREEN = Color(0xFF3BA55D)
 
-private data class Badge(val text: String, val bg: Color, val spin: Boolean = false)
+private data class Badge(@StringRes val text: Int, val bg: Color, val spin: Boolean = false)
 
 /** The original's status badge (top-left), mapped from the states this firmware has. */
 private fun badgeFor(s: ScaleState): Badge = when {
-    !s.connected -> Badge("Sem ligação", RED)
-    !s.scaleOk -> Badge("Erro", RED)
-    s.status == "scanning" -> Badge("A pesar", ACCENT, spin = true)
-    s.status == "stable" && s.fbState == 2 -> Badge("Sincronizado!", GREEN)
-    s.fbState == 2 -> Badge("Pronto", GREEN)
-    s.fbState == 1 -> Badge("A ligar…", ACCENT, spin = true)
-    else -> Badge("Sem conta", RED)
+    !s.connected -> Badge(R.string.no_connection, RED)
+    !s.scaleOk -> Badge(R.string.badge_error, RED)
+    s.status == "scanning" -> Badge(R.string.badge_weighing, ACCENT, spin = true)
+    s.status == "stable" && s.fbState == 2 -> Badge(R.string.badge_synced, GREEN)
+    s.fbState == 2 -> Badge(R.string.badge_ready, GREEN)
+    s.fbState == 1 -> Badge(R.string.connecting, ACCENT, spin = true)
+    else -> Badge(R.string.badge_no_account, RED)
 }
 
 /**
@@ -116,7 +118,7 @@ fun ScaleDisplay(
                     trackColor = TEXT.copy(alpha = 0.3f),
                 )
             }
-            Text(badge.text, color = TEXT, fontSize = f(16f))
+            Text(stringResource(badge.text), color = TEXT, fontSize = f(16f))
         }
 
         // ---- Top-centre: name ----
@@ -181,9 +183,9 @@ fun ScaleDisplay(
 
             // Container / filament are not read by this firmware yet (they come from the
             // TigerTag cloud in the original), so they show the original's "--" placeholder.
-            Text("RECIPIENTE", color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(246f), d(14f)))
+            Text(stringResource(R.string.container), color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(246f), d(14f)))
             Text("-- g", color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(376f), d(14f)))
-            Text("FILAMENTO", color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(246f), d(40f)))
+            Text(stringResource(R.string.filament), color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(246f), d(40f)))
             Text("-- g", color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(376f), d(40f)))
 
             Box(Modifier.offset(d(246f), d(68f)).size(d(184f), d(1f)).background(BORDER))
@@ -207,7 +209,7 @@ fun ScaleDisplay(
             verticalArrangement = Arrangement.Center,
         ) {
             Text("0.0", color = TEXT, fontSize = f(28f))
-            Text("TARA", color = TEXT, fontSize = f(16f))
+            Text(stringResource(R.string.tare), color = TEXT, fontSize = f(16f))
         }
 
         Column(
@@ -222,7 +224,7 @@ fun ScaleDisplay(
             verticalArrangement = Arrangement.Center,
         ) {
             GearIcon(Modifier.size(d(28f)))
-            Text("Definições", color = TEXT, fontSize = f(16f))
+            Text(stringResource(R.string.settings), color = TEXT, fontSize = f(16f))
         }
     }
 }
