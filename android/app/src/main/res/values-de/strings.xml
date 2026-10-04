@@ -20,6 +20,11 @@
     <string name="cancel">Abbrechen</string>
     <string name="logout">Abmelden</string>
     <string name="language">Sprache</string>
+    <string name="badge_sending">Senden</string>
+    <string name="badge_remove">Entfernen</string>
+    <string name="badge_no_tag">Warte auf NFC</string>
+    <string name="badge_cancelled">Wiegen abgebrochen</string>
+    <string name="badge_weigh_error">Wiegefehler</string>
     <string name="email">E-Mail</string>
     <string name="password">Passwort</string>
     <string name="app_name">Waage</string>

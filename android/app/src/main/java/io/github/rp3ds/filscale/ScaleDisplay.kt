@@ -64,6 +64,7 @@ private val MUTED = Color(0xFF8A93A6)
 private val FAINT = Color(0xFF565D6D)
 private val ACCENT = Color(0xFF2F7FFF)
 private val RED = Color(0xFFE24B4A)
+private val ORANGE = Color(0xFFE8821E)
 private val GREEN = Color(0xFF3BA55D)
 
 private data class Badge(@StringRes val text: Int, val bg: Color, val spin: Boolean = false)
@@ -72,8 +73,16 @@ private data class Badge(@StringRes val text: Int, val bg: Color, val spin: Bool
 private fun badgeFor(s: ScaleState): Badge = when {
     !s.connected -> Badge(R.string.no_connection, RED)
     !s.scaleOk -> Badge(R.string.badge_error, RED)
+    // the weigh workflow's states, as the scale's own screen shows them
+    s.status == "remove" -> Badge(R.string.badge_remove, ORANGE)
     s.status == "scanning" -> Badge(R.string.badge_weighing, ACCENT, spin = true)
-    s.status == "stable" && s.fbState == 2 -> Badge(R.string.badge_synced, GREEN)
+    s.status == "sending" -> Badge(R.string.badge_sending, ACCENT, spin = true)
+    s.status == "success" -> Badge(R.string.badge_synced, GREEN)
+    s.status == "error" -> Badge(R.string.badge_error, RED)
+    s.status == "no_tag" -> Badge(R.string.badge_no_tag, ORANGE, spin = true)
+    s.status == "cancelled" -> Badge(R.string.badge_cancelled, ORANGE)
+    s.status == "weigh_error" -> Badge(R.string.badge_weigh_error, RED)
+    // idle: say why it is not ready when there is no account yet
     s.fbState == 2 -> Badge(R.string.badge_ready, GREEN)
     s.fbState == 1 -> Badge(R.string.connecting, ACCENT, spin = true)
     else -> Badge(R.string.badge_no_account, RED)

@@ -20,6 +20,11 @@
     <string name="cancel">Annuler</string>
     <string name="logout">Déconnexion</string>
     <string name="language">Langue</string>
+    <string name="badge_sending">Envoi</string>
+    <string name="badge_remove">Retirer</string>
+    <string name="badge_no_tag">Attente NFC</string>
+    <string name="badge_cancelled">Pesée annulée</string>
+    <string name="badge_weigh_error">Erreur pesage</string>
     <string name="email">Email</string>
     <string name="password">Mot de passe</string>
     <string name="app_name">Balance</string>

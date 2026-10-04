@@ -26,6 +26,12 @@ static String gEmail, gName, gError;
 static String gUid, gIdToken, gRefresh;
 static String gColor;                     // account colour as RRGGBB (the original draws initials on it)
 static FbSpool gSpool;
+static volatile uint32_t gSendId = 0;
+static volatile int gSendResult = 0;         // 0 none, 1 in flight, 2 ok, 3 failed
+static volatile bool gSendPending = false;
+static String gSendUid, gSendTwin;
+static int gSendNet = 0;
+static volatile bool gForceBeat = false;
 static bool gProfileDocDone = false;
 static bool gProfilePhotoDone = false;
 static String gAvatar;                    // avatar URL of the signed-in account
@@ -84,7 +90,9 @@ static int request(const char *method, const String &url, const String &body,
     if (!http.begin(client, url)) return -1;
     if (contentType) http.addHeader("Content-Type", contentType);
     if (bearer.length()) http.addHeader("Authorization", "Bearer " + bearer);
-    int code = !strcmp(method, "GET") ? http.GET() : http.POST(body);
+    int code = !strcmp(method, "GET") ? http.GET()
+             : !strcmp(method, "PATCH") ? http.PATCH(body)
+             : http.POST(body);
     resp = http.getString();
     http.end();
     return code;
@@ -297,8 +305,8 @@ static bool fetchProfile() {
 // Streamed line by line like the profile, so the document size does not matter.
 class SpoolScanner : public Stream {
 public:
-    String line, lastKey, rackId, rackName, posLabel;
-    long container = -1, level = -1, position = -1;
+    String line, lastKey, rackId, rackName, posLabel, twin;
+    long container = -1, level = -1, position = -1, weightAvail = -1;
     size_t write(uint8_t c) override {
         if (c == '\n') { process(); line = ""; }
         else if (c != '\r' && line.length() < 500) line += (char)c;
@@ -331,10 +339,12 @@ private:
             if (lastKey == "container_weight") container = n;
             else if (lastKey == "level") level = n;
             else if (lastKey == "position") position = n;
+            else if (lastKey == "weight_available") weightAvail = n;
         } else if (t.startsWith("\"stringValue\"")) {
             if (lastKey == "id") rackId = v;
             else if (isNameKey(lastKey) && rackName.isEmpty()) rackName = v;
             else if (lastKey == "position_label" || lastKey == "positionLabel") posLabel = v;
+            else if (lastKey == "twin_tag_uid") { twin = v; twin.toUpperCase(); twin.replace(":", ""); twin.replace(" ", ""); }
         }
     }
 };
@@ -357,9 +367,10 @@ static void fetchSpool(const String &uidHex) {
     SpoolScanner sc;
     int code = -1;
     if (!streamGet(base + "/inventory/" + uidHex +
-                   "?mask.fieldPaths=container_weight&mask.fieldPaths=rack", sc, code) || code != 200) {
+                   "?mask.fieldPaths=container_weight&mask.fieldPaths=weight_available&mask.fieldPaths=rack&mask.fieldPaths=twin_tag_uid", sc, code) || code != 200) {
         Serial.printf("[FB] inventory %s -> HTTP %d (not in the inventory or unreachable)\n", uidHex.c_str(), code);
         FbSpool none;
+        none.fetched = true;        // looked it up: not there
         xSemaphoreTake(gLock, portMAX_DELAY); gSpool = none; xSemaphoreGive(gLock);
         return;
     }
@@ -377,8 +388,50 @@ static void fetchSpool(const String &uidHex) {
     s.container = (int)sc.container;
     s.rackName = rackName;
     s.rackPos = pos;
-    Serial.printf("[FB] inventory %s: container=%d g rack='%s' pos='%s'\n", uidHex.c_str(), s.container, rackName.c_str(), pos.c_str());
+    s.twin = sc.twin;
+    s.fetched = true;
+    Serial.printf("[FB] inventory %s: container=%d g rack='%s' pos='%s' twin=%s weight_available(now)=%ld\n", uidHex.c_str(),
+                  s.container, rackName.c_str(), pos.c_str(), sc.twin.c_str(), sc.weightAvail);
     xSemaphoreTake(gLock, portMAX_DELAY); gSpool = s; xSemaphoreGive(gLock);
+}
+
+// ---- weight write (the original's updateScaleLastSpool) --------------------------------
+static String isoNow() {
+    time_t t = time(nullptr);
+    struct tm *ti = gmtime(&t);
+    char b[30];
+    strftime(b, sizeof b, "%Y-%m-%dT%H:%M:%SZ", ti);
+    return b;
+}
+
+// PATCH weight_available + last_update on one inventory document. `currentDocument.exists=true`
+// makes Firestore refuse to CREATE a document: a tag that is not in the inventory must not
+// leave a stray document behind (a bare PATCH would).
+static bool patchInventory(const String &id, int net, const String &ts) {
+    String url = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid +
+                 "/inventory/" + id +
+                 "?updateMask.fieldPaths=weight_available&updateMask.fieldPaths=last_update&currentDocument.exists=true";
+    StaticJsonDocument<256> d;
+    d["fields"]["weight_available"]["integerValue"] = String(net);
+    d["fields"]["last_update"]["timestampValue"] = ts;
+    String body; serializeJson(d, body);
+    String resp;
+    int code = request("PATCH", url, body, "application/json", gIdToken, resp);
+    bool ok = code >= 200 && code < 300;
+    Serial.printf("[FB] PATCH inventory/%s net=%d -> HTTP %d%s\n", id.c_str(), net, code, ok ? "" : (" " + resp.substring(0, 100)).c_str());
+    return ok;
+}
+
+static bool doSend() {
+    static const uint32_t DELAYS[] = {1000, 2000};   // the original's backoff
+    String ts = isoNow();
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (attempt) vTaskDelay(pdMS_TO_TICKS(DELAYS[attempt - 1]));
+        bool ok = patchInventory(gSendUid, gSendNet, ts);
+        if (ok && gSendTwin.length() && gSendTwin != gSendUid) ok = patchInventory(gSendTwin, gSendNet, ts);
+        if (ok) return true;
+    }
+    return false;
 }
 
 static void jsonString(JsonObject f, const char *k, const String &v) {
@@ -407,7 +460,7 @@ static bool sendHeartbeat(bool full) {
     // needs every contiguous block it can get on this chip.
     String payload;
     {
-    DynamicJsonDocument doc(2048);
+    DynamicJsonDocument doc(3072);
     JsonObject w = doc.createNestedArray("writes").createNestedObject();
     JsonObject upd = w.createNestedObject("update");
     upd["name"] = String("projects/") + PROJECT + "/databases/(default)/documents/" + docPath;
@@ -426,6 +479,20 @@ static bool sendHeartbeat(bool full) {
     f["is_charging"]["nullValue"] = "NULL_VALUE";              m("is_charging");
     f["power_source"]["stringValue"] = "usb";                  m("power_source");
     f["power_state"]["stringValue"] = "active";                m("power_state");
+    f["workflow_phase"]["stringValue"] = s.wfPhase;            m("workflow_phase");
+    f["send_phase"]["stringValue"] = s.sendPhase;              m("send_phase");
+    f["session_id"]["integerValue"] = String((long)s.sessionId);          m("session_id");
+    f["sessions_started"]["integerValue"] = String((long)s.sessions);     m("sessions_started");
+    f["send_ok_count"]["integerValue"] = String((long)s.sendOk);          m("send_ok_count");
+    f["send_fail_count"]["integerValue"] = String((long)s.sendFail);      m("send_fail_count");
+    f["rfid_read_ok_count"]["integerValue"] = String((long)s.rfidOk);     m("rfid_read_ok_count");
+    f["rfid_read_fail_count"]["integerValue"] = String((long)s.rfidFail); m("rfid_read_fail_count");
+    f["auto_tare_count"]["integerValue"] = String((long)s.autoTare);      m("auto_tare_count");
+    f["workflow_reset_count"]["integerValue"] = String((long)s.resets);   m("workflow_reset_count");
+    jsonString(f, "last_measurement_uid_1", s.lastUid1);       m("last_measurement_uid_1");
+    jsonString(f, "last_measurement_uid_2", s.lastUid2);       m("last_measurement_uid_2");
+    f["last_measurement_weight_g"]["doubleValue"] = s.lastWeight;  m("last_measurement_weight_g");
+    jsonString(f, "last_measurement_status", s.lastStatus);    m("last_measurement_status");
     if (full) {
         f["fw_version"]["stringValue"] = s.fw;                 m("fw_version");
         f["mdns_hostname"]["stringValue"] = s.mdns;            m("mdns_hostname");
@@ -465,7 +532,10 @@ static void fbTask(void *) {
             needFull = true;
         }
 
-        if (WiFi.status() != WL_CONNECTED) continue;
+        if (WiFi.status() != WL_CONNECTED) {
+            if (gSendPending) { gSendPending = false; gSendResult = 3; }
+            continue;
+        }
 
         if (gPendLogin) {
             gPendLogin = false;
@@ -478,6 +548,7 @@ static void fbTask(void *) {
             continue;
         }
 
+        if (gSendPending && gRefresh.isEmpty()) { gSendPending = false; gSendResult = 3; }   // signed out: cannot send
         if (gRefresh.isEmpty()) continue;   // nothing to do while signed out
 
         if (!ensureTime()) continue;
@@ -488,6 +559,13 @@ static void fbTask(void *) {
             else { gState = FB_ERROR; gError = "Sessão expirada, entra de novo"; vTaskDelay(pdMS_TO_TICKS(10000)); continue; }
         } else if (gState != FB_SIGNED_IN && gState != FB_BUSY) {
             gState = FB_SIGNED_IN;
+        }
+
+        if (gSendPending) {
+            gSendPending = false;
+            bool ok = doSend();
+            gSendResult = ok ? 2 : 3;
+            if (ok) gForceBeat = true;   // the original beats right after a send
         }
 
         if (gNeedProfile) {
@@ -509,7 +587,8 @@ static void fbTask(void *) {
             }
         }
         bool changed = curUid != lastUid;
-        if (lastBeat == 0 || changed || millis() - lastBeat >= HEARTBEAT_MS) {
+        if (lastBeat == 0 || changed || gForceBeat || millis() - lastBeat >= HEARTBEAT_MS) {
+            gForceBeat = false;
             if (sendHeartbeat(needFull)) {
                 needFull = false;
                 lastUid = curUid;
@@ -560,6 +639,20 @@ int fbState() { return gState; }
 String fbEmail() { return gEmail; }
 String fbDisplayName() { return gName; }
 String fbErrorText() { return gError; }
+uint32_t fbSendWeight(const String &uid, const String &twin, int netGrams) {
+    gSendUid = uid; gSendTwin = twin; gSendNet = netGrams;
+    uint32_t id = gSendId + 1;
+    gSendId = id;
+    gSendResult = 1;
+    gSendPending = true;
+    return id;
+}
+
+int fbSendStatus(uint32_t id) {
+    if (id != gSendId) return 3;
+    return gSendResult;
+}
+
 FbSpool fbSpool() {
     FbSpool s;
     xSemaphoreTake(gLock, portMAX_DELAY); s = gSpool; xSemaphoreGive(gLock);

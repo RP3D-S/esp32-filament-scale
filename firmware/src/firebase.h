@@ -15,6 +15,12 @@ struct FbSnapshot {
     bool   readerOk = false;
     bool   scaleOk = false;
     String status;
+    // weigh workflow, written to the scale document like the original does
+    String wfPhase, sendPhase;
+    uint32_t sessionId = 0, sessions = 0, sendOk = 0, sendFail = 0;
+    uint32_t rfidOk = 0, rfidFail = 0, autoTare = 0, resets = 0;
+    String lastUid1, lastUid2, lastStatus;
+    float  lastWeight = 0;
 };
 
 enum FbState { FB_SIGNED_OUT = 0, FB_BUSY = 1, FB_SIGNED_IN = 2, FB_ERROR = 3 };
@@ -42,8 +48,19 @@ struct FbSpool {
     int    container = -1;   // empty-spool weight in grams, -1 when unknown (tag not in the inventory)
     String rackName;         // empty when the spool is not placed in a rack
     String rackPos;          // e.g. "A3": level letter + position
+    bool   fetched = false;  // the lookup for the current tag has finished (found or not)
+    String twin;             // the spool's other tag, empty when none
 };
 FbSpool fbSpool();
+
+/**
+ * Writes the net weight to the spool's inventory document (and its twin's), as the original does:
+ * weight_available + last_update, three attempts. Returns an id for fbSendStatus().
+ */
+uint32_t fbSendWeight(const String &uid, const String &twin, int netGrams);
+
+/** 1 in flight, 2 done, 3 failed (also for an id that was superseded). */
+int fbSendStatus(uint32_t id);
 
 /** Account colour as RRGGBB (from the user's profile), empty when signed out. */
 String fbAvatarColor();

@@ -12,6 +12,7 @@
 #include <HX711.h>
 #include <NimBLEDevice.h>
 #include "firebase.h"
+#include "workflow.h"
 #include <Adafruit_PN532.h>
 
 #ifndef FW_VERSION
@@ -129,7 +130,8 @@ static int     shownWeight = 0;
 static bool    scaleOk = false;
 static uint32_t lastScaleOkMs = 0;
 
-static String  uid;
+static String  uid;        // tag latched by the workflow (the original's lastUID), shown everywhere
+static String  tagLive;    // tag the reader sees right now
 static volatile bool rfTest = false;      // RFID test screen open: poll faster, keep the last UID
 static String  testUid;                    // sticky: stays after the tag is removed, until reset
 static volatile int pendRfPow = -1;
@@ -163,7 +165,7 @@ static void doTare() {
     scale.tare(10);
     saveTare();
     filtered = 0; shownWeight = 0;
-    uid = "";
+    tagLive = "";
 }
 
 static void doCalibrate(float grams) {
@@ -193,9 +195,20 @@ static void updateScale() {
 }
 
 static void updateStatus() {
-    if (shownWeight < PRESENT_G) { scaleStatus = "idle"; return; }
-    bool stable = millis() - stableSince >= STABLE_MS;
-    scaleStatus = (uid.length() && stable) ? "stable" : "scanning";
+    WfInputs in;
+    in.w = filtered;
+    in.tagUid = tagLive;
+    in.signedIn = fbState() == FB_SIGNED_IN;
+    in.wifiUp = WiFi.status() == WL_CONNECTED;
+    FbSpool sp = fbSpool();
+    in.spoolFetched = sp.fetched;
+    in.container = sp.container;
+    in.twin = sp.twin;
+    WfOutputs out;
+    wfUpdate(in, out);
+    if (out.tare) pendTare = true;
+    uid = wfUid();
+    scaleStatus = wfStatus();
 }
 
 // ---- RFID -----------------------------------------------------------------
@@ -204,8 +217,8 @@ static void pollRfid() {
     if (millis() - last < (rfTest ? RFID_TEST_POLL_MS : RFID_POLL_MS)) return;
     last = millis();
     String u;
-    if (reader.ok && reader.poll(u)) { uid = u; seenMs = millis(); if (rfTest) testUid = u; }
-    if (uid.length() && millis() - seenMs > RFID_LOST_MS) uid = "";
+    if (reader.ok && reader.poll(u)) { tagLive = u; seenMs = millis(); if (rfTest) testUid = u; }
+    if (tagLive.length() && millis() - seenMs > RFID_LOST_MS) tagLive = "";
 }
 
 // ---- JSON / WebSocket -----------------------------------------------------
@@ -693,6 +706,12 @@ void loop() {
         fs.weight = shownWeight; fs.uid = uid; fs.cal = calFactor; fs.rssi = (int)WiFi.RSSI();
         fs.ip = WiFi.localIP().toString(); fs.mdns = mdnsName + ".local"; fs.fw = FW_VERSION;
         fs.readerOk = reader.ok; fs.scaleOk = scaleOk; fs.status = scaleStatus;
+        fs.wfPhase = wfPhaseName(); fs.sendPhase = wfSendPhase();
+        WfStats ws_ = wfStats();
+        fs.sessionId = ws_.sessionId; fs.sessions = ws_.sessions; fs.sendOk = ws_.sendOk; fs.sendFail = ws_.sendFail;
+        fs.rfidOk = ws_.rfidOk; fs.rfidFail = ws_.rfidFail; fs.autoTare = ws_.autoTare; fs.resets = ws_.resets;
+        WfLast lm = wfLast();
+        fs.lastUid1 = lm.uid1; fs.lastUid2 = lm.uid2; fs.lastStatus = lm.status; fs.lastWeight = lm.weight;
         fbPublish(fs);
     }
 

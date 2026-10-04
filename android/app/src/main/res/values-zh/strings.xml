@@ -20,6 +20,11 @@
     <string name="cancel">取消</string>
     <string name="logout">退出登录</string>
     <string name="language">语言</string>
+    <string name="badge_sending">发送中</string>
+    <string name="badge_remove">取出</string>
+    <string name="badge_no_tag">等待 NFC</string>
+    <string name="badge_cancelled">称重已取消</string>
+    <string name="badge_weigh_error">称重错误</string>
     <string name="email">邮箱</string>
     <string name="password">密码</string>
     <string name="app_name">秤</string>

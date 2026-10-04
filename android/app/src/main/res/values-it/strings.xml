@@ -20,6 +20,11 @@
     <string name="cancel">Annulla</string>
     <string name="logout">Disconnetti</string>
     <string name="language">Lingua</string>
+    <string name="badge_sending">Invio</string>
+    <string name="badge_remove">Rimuovi</string>
+    <string name="badge_no_tag">Attesa NFC</string>
+    <string name="badge_cancelled">Pesata annullata</string>
+    <string name="badge_weigh_error">Errore pesatura</string>
     <string name="email">Email</string>
     <string name="password">Password</string>
     <string name="app_name">Bilancia</string>
