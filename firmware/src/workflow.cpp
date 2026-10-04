@@ -54,6 +54,7 @@ static float    slope = 0;
 
 static uint32_t sendId = 0;
 static bool     sendStarted = false;
+static uint32_t fetchWaitSinceMs = 0;   // SENDING waits here for the inventory lookup (container + twin)
 static float    sendNet = 0;
 
 static uint32_t negSinceMs = 0, lastNegTareMs = 0;
@@ -116,6 +117,7 @@ static void clearSession() {
     stableCandidate = NAN; stableSinceMs = 0;
     peak = 0; belowThreshMs = 0;
     sendStarted = false;
+    fetchWaitSinceMs = 0;
     resetSlope();
 }
 
@@ -285,6 +287,14 @@ void wfUpdate(const WfInputs &in, WfOutputs &out) {
     // ---- SENDING ----
     if (phase == P_SENDING) {
         if (!sendStarted) {
+            // The net weight needs the empty-spool weight and the twin from the inventory. The original
+            // fetches them inline if they are not there yet; here the cloud task is already on it, so
+            // wait for it (a lookup is ~3 s; give up after 15 s and send what we have).
+            if (!in.spoolFetched) {
+                if (!fetchWaitSinceMs) fetchWaitSinceMs = now;
+                if (now - fetchWaitSinceMs < 15000) return;
+            }
+            fetchWaitSinceMs = 0;
             float container = in.container > 0 ? (float)in.container : 0.0f;
             if (container > 0 && w < container - 5.0f) {
                 // gross below the empty spool: negative net, not worth sending

@@ -586,7 +586,7 @@ static void onWsEvent(AsyncWebSocket *s, AsyncWebSocketClient *c, AwsEventType t
 }
 
 static void sendStatusJson(AsyncWebServerRequest *r) {
-    StaticJsonDocument<768> d;
+    StaticJsonDocument<1536> d;
     d["weight"] = shownWeight; d["rawWeight"] = rawWeight;
     d["uid"] = uid;
     d["wifi"] = WiFi.SSID(); d["ip"] = WiFi.localIP().toString();
@@ -596,6 +596,12 @@ static void sendStatusJson(AsyncWebServerRequest *r) {
     d["uptime_s"] = millis() / 1000; d["fw_version"] = FW_VERSION;
     d["wifi_signal_dbm"] = (int)WiFi.RSSI();
     d["firebaseAuth"] = fbState() == FB_SIGNED_IN; d["firebaseEmail"] = fbEmail();
+    // weigh workflow and last measurement, like the original's /api/session
+    d["wfPhase"] = wfPhaseName(); d["sendPhase"] = wfSendPhase();
+    WfLast lm = wfLast(); WfStats st = wfStats();
+    d["lastMeasurementStatus"] = lm.status; d["lastMeasurementWeight"] = lm.weight; d["lastMeasurementUid"] = lm.uid1;
+    d["sendOk"] = st.sendOk; d["sendFail"] = st.sendFail; d["sessions"] = st.sessions;
+    FbSpool sp = fbSpool(); d["containerWeight"] = sp.container; d["rack"] = sp.rackName; d["rackPos"] = sp.rackPos;
     String out; serializeJson(d, out);
     r->send(200, "application/json", out);
 }
@@ -804,9 +810,10 @@ void loop() {
         if (full) lastFull = millis();
         if (ws.count()) {
             String f = buildFrame(full, wsState);
-            if (f.length()) ws.textAll(f);
+            // a slow client (phone asleep) must not pile up messages: the library closes the socket when its queue fills
+            if (f.length() && ws.availableForWriteAll()) ws.textAll(f);
             String rf = buildRfFrame(full, wsRf);
-            if (rf.length()) ws.textAll(rf);
+            if (rf.length() && ws.availableForWriteAll()) ws.textAll(rf);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
             wsRf = RfState();
