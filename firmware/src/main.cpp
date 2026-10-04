@@ -547,6 +547,7 @@ void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.println("\n[BOOT] filament scale " FW_VERSION);
+    Serial.printf("[HEAP] boot %u\n", (unsigned)ESP.getFreeHeap());
 
     prefs.begin("scale", true);
     calFactor    = prefs.getFloat("cal", calFactor);
@@ -576,7 +577,9 @@ void setup() {
     WiFi.setAutoReconnect(true);
     WiFi.persistent(true);
     pinMode(BOOT_BTN, INPUT_PULLUP);
+    Serial.printf("[HEAP] before BLE %u\n", (unsigned)ESP.getFreeHeap());
     setupBle();
+    Serial.printf("[HEAP] after BLE %u\n", (unsigned)ESP.getFreeHeap());
     WiFi.begin();
 
     {
@@ -586,6 +589,7 @@ void setup() {
     }
     setupRoutes();
     server.begin();
+    Serial.printf("[HEAP] after server %u largest %u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
 void loop() {

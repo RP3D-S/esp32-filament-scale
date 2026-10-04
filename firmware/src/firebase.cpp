@@ -153,6 +153,7 @@ static void jsonString(JsonObject f, const char *k, const String &v) {
 }
 
 static bool sendHeartbeat(bool full) {
+    Serial.printf("[FB] heap free=%u largest=%u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
     FbSnapshot s;
     xSemaphoreTake(gLock, portMAX_DELAY);
     s = gSnap;
@@ -169,6 +170,10 @@ static bool sendHeartbeat(bool full) {
         nameIt = request("GET", base + "/" + docPath + "?mask.fieldPaths=display_name", "", nullptr, gIdToken, r) == 404;
     }
 
+    // The JSON document is scoped so its memory is back before the TLS handshake, which
+    // needs every contiguous block it can get on this chip.
+    String payload;
+    {
     DynamicJsonDocument doc(2048);
     JsonObject w = doc.createNestedArray("writes").createNestedObject();
     JsonObject upd = w.createNestedObject("update");
@@ -201,7 +206,8 @@ static bool sendHeartbeat(bool full) {
     tr["fieldPath"] = "last_heartbeat_at";
     tr["setToServerValue"] = "REQUEST_TIME";
 
-    String payload; serializeJson(doc, payload);
+    serializeJson(doc, payload);
+    }
     String resp;
     int code = request("POST", base + ":commit", payload, "application/json", gIdToken, resp);
     if (code >= 200 && code < 300) return true;
@@ -281,7 +287,7 @@ void fbBegin(const String &mac) {
     gName = p.getString("name", "");
     p.end();
     gState = gRefresh.length() ? FB_BUSY : FB_SIGNED_OUT;   // BUSY until the first refresh succeeds
-    xTaskCreatePinnedToCore(fbTask, "fb", 16384, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(fbTask, "fb", 10240, nullptr, 1, nullptr, 0);
 }
 
 void fbPublish(const FbSnapshot &s) {
