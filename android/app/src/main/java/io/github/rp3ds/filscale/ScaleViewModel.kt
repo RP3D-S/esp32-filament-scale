@@ -1,6 +1,8 @@
 package io.github.rp3ds.filscale
 
 import android.app.Application
+import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -32,9 +34,15 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<ScaleState> = _state.asStateFlow()
 
     private val client = ScaleClient(
-        opened = { _state.update { it.copy(wifiLinked = true, message = null) } },
-        frame = { onFrame(it) },
+        opened = { Log.d("FilScale", "wifi link up"); lastWifiFrameMs = SystemClock.elapsedRealtime(); _state.update { it.copy(wifiLinked = true, message = null) } },
+        frame = {
+            val now = SystemClock.elapsedRealtime()
+            if (lastWifiFrameMs != 0L && now - lastWifiFrameMs > 1_500) Log.d("FilScale", "wifi frame gap ${now - lastWifiFrameMs} ms")
+            lastWifiFrameMs = now
+            onFrame(it)
+        },
         closed = { err ->
+            Log.d("FilScale", "wifi link down: $err")
             _state.update { it.copy(wifiLinked = false, message = if (it.bleLinked) null else err) }
             scheduleReconnect()
         },
@@ -43,9 +51,16 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     private val ble = ScaleBle(
         app,
         linked = { up, name ->
+            Log.d("FilScale", "ble link ${if (up) "up" else "down"}")
+            if (up) lastBleFrameMs = SystemClock.elapsedRealtime()
             _state.update { it.copy(bleLinked = up, scaleName = if (up && name.isNotBlank()) name else it.scaleName) }
         },
-        frame = { onFrame(it) },
+        frame = {
+            val now = SystemClock.elapsedRealtime()
+            if (lastBleFrameMs != 0L && now - lastBleFrameMs > 1_500) Log.d("FilScale", "ble frame gap ${now - lastBleFrameMs} ms")
+            lastBleFrameMs = now
+            onFrame(it)
+        },
         foundCb = { list -> _state.update { it.copy(found = list) } },
     )
 
@@ -55,9 +70,36 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var reconnectJob: Job? = null
+
+    // The scale sends a keep-alive every 2 s, so silence means a dead link, not "no news".
+    @Volatile private var lastWifiFrameMs = 0L
+    @Volatile private var lastBleFrameMs = 0L
+
+    /** Reconnects a link that claims to be up but has delivered nothing for `maxAgeMs`. */
+    private fun checkLinks(maxAgeMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        val s = _state.value
+        if (s.wifiLinked && now - lastWifiFrameMs > maxAgeMs) {
+            Log.d("FilScale", "wifi link stale ${now - lastWifiFrameMs} ms -> reconnect")
+            client.disconnect()
+            _state.update { it.copy(wifiLinked = false) }
+            connectWifi()
+        }
+        if (s.bleLinked && now - lastBleFrameMs > maxAgeMs) { Log.d("FilScale", "ble link stale ${now - lastBleFrameMs} ms -> reconnect"); ble.reconnect() }
+    }
+
+    /** The app came back to the foreground (e.g. after the phone slept): do not wait for timeouts. */
+    fun onForeground() {
+        Log.d("FilScale", "foreground: wifi=${_state.value.wifiLinked} ble=${_state.value.bleLinked}")
+        checkLinks(2_500)
+        val s = _state.value
+        if (!s.wifiLinked && s.host.isNotBlank()) { reconnectJob?.cancel(); connectWifi() }
+        if (!s.bleLinked) ble.start()
+    }
     private var wantWifi = false
 
     init {
+        viewModelScope.launch { while (true) { delay(1_000); checkLinks(6_000) } }
         TigerTagDb.init(app)
         ble.setTarget(savedAddr)
         if (_state.value.host.isNotBlank()) connectWifi() else search()

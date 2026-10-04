@@ -70,6 +70,12 @@ public:
         // Adafruit's begin() calls serial->begin(115200) with no pins, so the
         // pins have to be claimed first.
         _ser.begin(115200, SERIAL_8N1, _rx, _tx);
+        // Adafruit_PN532 reads replies with Stream::readBytes(), which waits the stream's timeout (1000 ms
+        // by default) whenever fewer bytes arrive than it asked for. A "no tag" reply is short, so every
+        // poll with nothing in the field blocked the whole main loop for a second: weight and status
+        // reached the phone once per second and the filter got one sample per second. A real reply
+        // arrives in ~2 ms at 115200, so 30 ms is plenty.
+        _ser.setTimeout(30);
         _pn.begin();
         version = _pn.getFirmwareVersion();
         ok = version != 0;
@@ -374,6 +380,7 @@ static volatile bool bleNeedFull = false;
 class BleServerCb : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer *s, NimBLEConnInfo &info) override { bleClients = bleClients + 1; }
     void onDisconnect(NimBLEServer *s, NimBLEConnInfo &info, int reason) override {
+        Serial.printf("[BLE] client disconnected, reason=0x%X\n", reason);
         if (bleClients > 0) bleClients = bleClients - 1;
         NimBLEDevice::startAdvertising();
     }
@@ -564,6 +571,14 @@ static void pumpBle(bool periodicFull) {
         putField<String>(sf, "rk", sp.rackName, lRk, full);
         putField<String>(sf, "rp", sp.rackPos, lRp, full);
         if (sf.size()) { String out; serializeJson(sf, out); bleEnqueue(out); }
+    }
+
+    // Keep-alive: nothing else is sent while the weight and the tag do not change, and the phone cannot
+    // tell "no news" from "dead link". A tiny frame every 2 s lets it notice a stalled link in seconds.
+    static uint32_t lastKeepAlive = 0;
+    if (millis() - lastKeepAlive >= 2000) {
+        lastKeepAlive = millis();
+        bleEnqueue(String("{\"up\":") + String(millis() / 1000) + "}");
     }
 
     static String lAva = "\x01";
@@ -775,6 +790,14 @@ void setup() {
 }
 
 void loop() {
+    // Diagnostics: a long gap between two passes means something blocked the main loop, and the
+    // phone sees every frame (weight, status) late by that much.
+    static uint32_t lastPass = 0;
+    {
+        uint32_t t = millis();
+        if (lastPass && t - lastPass > 400) Serial.printf("[LOOP] stall %u ms\n", (unsigned)(t - lastPass));
+        lastPass = t;
+    }
     static uint32_t lastWs = 0, lastFull = 0;
 
     if (pendTare)           { pendTare = false; doTare(); }
@@ -827,15 +850,25 @@ void loop() {
         fbPublish(fs);
     }
 
+    uint32_t t0 = millis();
     updateScale();
+    uint32_t t1 = millis();
     pollRfid();
+    uint32_t t2 = millis();
     updateStatus();
+    uint32_t t3 = millis();
+    if (t3 - t0 > 300) Serial.printf("[LOOP] scale=%u rfid=%u status=%u ms\n", (unsigned)(t1 - t0), (unsigned)(t2 - t1), (unsigned)(t3 - t2));
 
     if (millis() - lastWs >= WS_INTERVAL_MS) {
         lastWs = millis();
         bool full = millis() - lastFull >= WS_FULL_INTERVAL_MS;
         if (full) lastFull = millis();
         if (ws.count()) {
+            static uint32_t lastWsKeepAlive = 0;
+            if (millis() - lastWsKeepAlive >= 2000 && ws.availableForWriteAll()) {
+                lastWsKeepAlive = millis();
+                ws.textAll(String("{\"up\":") + String(millis() / 1000) + "}");
+            }
             String f = buildFrame(full, wsState);
             // a slow client (phone asleep) must not pile up messages: the library closes the socket when its queue fills
             if (f.length() && ws.availableForWriteAll()) ws.textAll(f);

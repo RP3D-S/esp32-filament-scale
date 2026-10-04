@@ -46,5 +46,7 @@ cloud/WS sections from upstream, with:
 6. [x] Android app in `android/` (written, not compiled)
 7. [ ] Bench test on hardware
 
+Current status and how to continue on another PC: [HANDOFF.md](HANDOFF.md).
+
 Upstream: https://github.com/TigerTag-Project/Tiger-Scale-V3 (MIT). Per upstream's
 TRADEMARK.md, a modified fork must not be called "TigerScale".

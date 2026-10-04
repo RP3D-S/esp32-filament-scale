@@ -21,7 +21,7 @@ class ScaleClient(
 ) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(4, TimeUnit.SECONDS)
-        .pingInterval(10, TimeUnit.SECONDS)
+        .pingInterval(5, TimeUnit.SECONDS)
         .build()
 
     @Volatile private var socket: WebSocket? = null

@@ -56,6 +56,11 @@ class MainActivity : ComponentActivity() {
             if (result.values.all { it }) vm.startBle()
         }
 
+    override fun onStart() {
+        super.onStart()
+        vm.onForeground()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 

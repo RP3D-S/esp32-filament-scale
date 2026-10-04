@@ -104,6 +104,16 @@ class ScaleBle(
         start()
     }
 
+    /** Drops the current link (it stopped delivering data) and connects again right away. */
+    fun reconnect() {
+        main.removeCallbacksAndMessages(null)
+        stopScan()
+        gatt?.let { it.disconnect(); it.close() }
+        gatt = null; cmdChar = null; secChar = null; ready = false
+        linked(false, "")
+        if (wanted) start()
+    }
+
     /** Forgets the chosen scale and disconnects. */
     fun forget() {
         target = null
