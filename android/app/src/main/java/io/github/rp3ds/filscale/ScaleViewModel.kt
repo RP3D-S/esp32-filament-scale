@@ -62,8 +62,36 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.host.isNotBlank()) connectWifi() else search()
     }
 
+    // The avatar URL arrives over BLE in numbered chunks: {"fba":N,"fbi":i,"fbd":"..."}; {"fba":0} = none.
+    private var avatarParts: Array<String?> = emptyArray()
+
+    @Synchronized
+    private fun onAvatarChunk(j: JSONObject) {
+        val n = j.optInt("fba", -1)
+        if (n == 0) {
+            avatarParts = emptyArray()
+            _state.update { it.copy(avatarUrl = "") }
+            return
+        }
+        val i = j.optInt("fbi", -1)
+        if (n < 0 || i !in 0 until n) return
+        if (avatarParts.size != n) avatarParts = arrayOfNulls(n)
+        avatarParts[i] = j.optString("fbd")
+        if (avatarParts.all { it != null }) {
+            val url = avatarParts.joinToString("")
+            _state.update { it.copy(avatarUrl = url) }
+        }
+    }
+
     private fun onFrame(frame: JSONObject) {
+        if (frame.has("fba")) onAvatarChunk(frame)
         _state.update { it.merge(frame) }
+        // Signed out (or switching accounts): no avatar may linger from the previous account.
+        _state.update {
+            if (it.fbState != 2 && (it.avatarUrl.isNotEmpty() || it.avatarColor.isNotEmpty())) {
+                it.copy(avatarUrl = "", avatarColor = "")
+            } else it
+        }
         // BLE frames carry the scale's IP: if no Wi-Fi address is set yet, adopt it.
         val s = _state.value
         if (s.host.isBlank() && s.ip.isNotBlank()) setHost(s.ip)
@@ -87,6 +115,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             ScaleState(scaleName = scale.name, noScale = false, blePerm = it.blePerm)
         }
+        avatarParts = emptyArray()
         ble.choose(scale.address)
     }
 

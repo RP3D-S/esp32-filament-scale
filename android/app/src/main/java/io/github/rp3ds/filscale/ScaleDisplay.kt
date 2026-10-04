@@ -1,6 +1,15 @@
 package io.github.rp3ds.filscale
 
+import android.graphics.Bitmap
 import androidx.annotation.StringRes
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -122,7 +131,16 @@ fun ScaleDisplay(
         }
 
         // ---- Top-centre: name ----
-        Box(Modifier.fillMaxWidth().offset(y = d(6f)), contentAlignment = Alignment.TopCenter) {
+        // Avatar + name, like the original; the avatar exists only while an account is signed in.
+        Row(
+            Modifier.fillMaxWidth().offset(y = d(4f)),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (s.fbState == 2) {
+                Avatar(s, d(28f), f(13f))
+                Spacer(Modifier.width(d(6f)))
+            }
             Text(if (s.fbState == 2 && s.fbName.isNotBlank()) s.fbName else "FilScale", color = TEXT, fontSize = f(20f))
         }
 
@@ -292,5 +310,26 @@ private fun GearIcon(modifier: Modifier) {
             }
         }
         drawCircle(TEXT, r * 0.66f, c, style = Stroke(r * 0.3f))
+    }
+}
+
+/** The account photo when there is one, otherwise the initials on the account's colour (as on the original). */
+@Composable
+private fun Avatar(s: ScaleState, size: Dp, fontSize: TextUnit) {
+    val photo by produceState<Bitmap?>(null, s.avatarUrl) {
+        value = if (s.avatarUrl.isBlank()) null else AvatarLoader.load(s.avatarUrl)
+    }
+    val bg = runCatching { Color(android.graphics.Color.parseColor("#" + s.avatarColor)) }.getOrDefault(ACCENT)
+    val name = s.fbName.ifBlank { s.fbEmail }
+    val initials = name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        .let { w -> if (w.size >= 2) "" + w.first().first() + w.last().first() else w.firstOrNull()?.take(1) ?: "?" }
+        .uppercase()
+    Box(Modifier.size(size).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+        val b = photo
+        if (b != null) {
+            Image(b.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Text(initials, color = TEXT, fontSize = fontSize, fontWeight = FontWeight.Bold)
+        }
     }
 }

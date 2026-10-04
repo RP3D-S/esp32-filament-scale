@@ -24,6 +24,11 @@ static volatile int gState = FB_SIGNED_OUT;
 static String gEmail, gName, gError;
 
 static String gUid, gIdToken, gRefresh;
+static String gColor;                     // account colour as RRGGBB (the original draws initials on it)
+static bool gProfileDocDone = false;
+static String gAvatar;                    // avatar URL of the signed-in account
+static bool gNeedProfile = false;         // fetch name + avatar once per session
+static int gProfileTries = 0;
 static uint32_t gTokenMs = 0;
 
 static String gPendEmail, gPendPass;
@@ -38,6 +43,8 @@ static void saveSession() {
     p.putString("uid", gUid);
     p.putString("email", gEmail);
     p.putString("name", gName);
+    p.putString("avatar", gAvatar);
+    p.putString("color", gColor);
     p.end();
 }
 
@@ -46,7 +53,8 @@ static void clearSession() {
     p.begin("fb", false);
     p.clear();
     p.end();
-    gUid = gIdToken = gRefresh = gEmail = gName = "";
+    gUid = gIdToken = gRefresh = gEmail = gName = gAvatar = gColor = "";
+    gProfileDocDone = false;
 }
 
 // TLS with the certificate bundle built into the Arduino core, so the server is verified.
@@ -128,6 +136,8 @@ static bool signIn(const String &email, const String &pass) {
     gTokenMs = millis();
     if (gIdToken.isEmpty() || gUid.isEmpty()) { gError = "Resposta inválida"; return false; }
     saveSession();
+    gNeedProfile = true;
+    gProfileTries = 0;
     return true;
 }
 
@@ -145,6 +155,111 @@ static bool refreshToken() {
     if (rt.length()) gRefresh = rt;
     gTokenMs = millis();
     saveSession();
+    return true;
+}
+
+// ---- profile (name + avatar) --------------------------------------------------
+// The user document can be large and the heap is small, so the response is never held whole:
+// it streams through this scanner line by line and only the interesting values are kept.
+static String unescapeJson(String v) {
+    v.replace("\\u0026", "&");
+    v.replace("\\/", "/");
+    v.replace("\\\"", "\"");
+    return v;
+}
+
+class ProfileScanner : public Stream {
+public:
+    String line, lastKey, avatar, avatarKey, name, keys;
+    int cr = -1, cg = -1, cb = -1;
+    size_t write(uint8_t c) override {
+        if (c == '\n') { process(); line = ""; }
+        else if (c != '\r' && line.length() < 700) line += (char)c;
+        return 1;
+    }
+    size_t write(const uint8_t *b, size_t n) override { for (size_t i = 0; i < n; i++) write(b[i]); return n; }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    void flush() override {}
+
+private:
+    void process() {
+        String t = line; t.trim();
+        if (t.endsWith("{") && t.startsWith("\"")) {            // "key": {
+            int e = t.indexOf('"', 1);
+            if (e > 1) { lastKey = t.substring(1, e); keys += lastKey + " "; }
+            return;
+        }
+        if (t.startsWith("\"integerValue\"") || t.startsWith("\"doubleValue\"")) {
+            int c0 = t.indexOf(':');
+            String n = t.substring(c0 + 1); n.trim(); n.replace("\"", ""); n.replace(",", "");
+            int val = (int)n.toFloat();
+            if (lastKey == "color_r") cr = val; else if (lastKey == "color_g") cg = val; else if (lastKey == "color_b") cb = val;
+            return;
+        }
+        if (!t.startsWith("\"stringValue\"")) return;
+        int c = t.indexOf(':');
+        if (c < 0) return;
+        String v = t.substring(c + 1); v.trim();
+        if (v.endsWith(",")) v.remove(v.length() - 1);
+        if (v.length() < 2 || v[0] != '"' || v[v.length() - 1] != '"') return;
+        v = v.substring(1, v.length() - 1);
+        String kl = lastKey; kl.toLowerCase();
+        if (kl == "displayname") name = unescapeJson(v);
+        bool avatarish = kl.indexOf("avatar") >= 0 || kl.indexOf("photo") >= 0 || kl.indexOf("picture") >= 0 ||
+                         kl.indexOf("image") >= 0 || kl.indexOf("pic") >= 0;
+        if (v.startsWith("http") && avatarish && (avatar.isEmpty() || kl.indexOf("avatar") >= 0)) {
+            avatar = unescapeJson(v);
+            avatarKey = lastKey;
+        }
+    }
+};
+
+static bool fetchProfile() {
+    // Phase 1: the Firestore user document (name, colour). The client lives in its own scope
+    // so its TLS buffers are freed before phase 2 opens another connection: two at once
+    // do not fit in this chip's heap.
+    if (!gProfileDocDone) {
+        ProfileScanner sc;
+        int code;
+        {
+            WiFiClientSecure client;
+            client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
+            HTTPClient http;
+            http.setTimeout(10000);
+            String url = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid;
+            if (!http.begin(client, url)) return false;
+            http.addHeader("Authorization", "Bearer " + gIdToken);
+            code = http.GET();
+            if (code == 200) http.writeToStream(&sc);
+            http.end();
+        }
+        if (code != 200) { Serial.printf("[FB] profile HTTP %d\n", code); return false; }
+
+        Serial.printf("[FB] user doc keys: %s\n", sc.keys.c_str());
+        if (sc.name.length()) gName = sc.name;
+        if (sc.cr >= 0 && sc.cg >= 0 && sc.cb >= 0) {
+            char hex[8];
+            snprintf(hex, sizeof hex, "%02X%02X%02X", constrain(sc.cr, 0, 255), constrain(sc.cg, 0, 255), constrain(sc.cb, 0, 255));
+            gColor = hex;
+        }
+        if (sc.avatar.length()) { gAvatar = sc.avatar; Serial.printf("[FB] avatar from field '%s'\n", sc.avatarKey.c_str()); }
+        gProfileDocDone = true;
+        saveSession();
+    }
+
+    // Phase 2: the Auth profile photo (set when the account is linked to Google).
+    if (gAvatar.isEmpty()) {
+        String resp;
+        String lu = String("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=") + API_KEY;
+        int code = request("POST", lu, String("{\"idToken\":\"") + gIdToken + "\"}", "application/json", "", resp);
+        if (code != 200) { Serial.printf("[FB] lookup HTTP %d\n", code); return false; }
+        String photo = unescapeJson(extractStr(resp, "photoUrl"));
+        if (photo.length()) { gAvatar = photo; Serial.println("[FB] avatar from Auth photoUrl"); }
+        else Serial.println("[FB] no photo on this account, colour initials only");
+        saveSession();
+    }
     return true;
 }
 
@@ -256,6 +371,10 @@ static void fbTask(void *) {
             gState = FB_SIGNED_IN;
         }
 
+        if (gNeedProfile) {
+            if (fetchProfile() || ++gProfileTries >= 3) gNeedProfile = false;
+        }
+
         // Heartbeat every 30 s, or at once when the tag changes.
         String curUid;
         xSemaphoreTake(gLock, portMAX_DELAY);
@@ -285,7 +404,10 @@ void fbBegin(const String &mac) {
     gUid = p.getString("uid", "");
     gEmail = p.getString("email", "");
     gName = p.getString("name", "");
+    gAvatar = p.getString("avatar", "");
+    gColor = p.getString("color", "");
     p.end();
+    gNeedProfile = gRefresh.length() > 0;
     gState = gRefresh.length() ? FB_BUSY : FB_SIGNED_OUT;   // BUSY until the first refresh succeeds
     xTaskCreatePinnedToCore(fbTask, "fb", 10240, nullptr, 1, nullptr, 0);
 }
@@ -311,3 +433,5 @@ int fbState() { return gState; }
 String fbEmail() { return gEmail; }
 String fbDisplayName() { return gName; }
 String fbErrorText() { return gError; }
+String fbAvatarColor() { return gState == FB_SIGNED_IN ? gColor : String(""); }
+String fbAvatarUrl() { return gState == FB_SIGNED_IN ? gAvatar : String(""); }

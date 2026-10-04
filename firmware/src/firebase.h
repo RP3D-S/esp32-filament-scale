@@ -33,3 +33,9 @@ int    fbState();
 String fbEmail();
 String fbDisplayName();
 String fbErrorText();
+
+/** URL of the signed-in account's avatar, empty when signed out or the account has none. */
+String fbAvatarUrl();
+
+/** Account colour as RRGGBB (from the user's profile), empty when signed out. */
+String fbAvatarColor();

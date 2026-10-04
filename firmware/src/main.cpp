@@ -220,6 +220,7 @@ struct FrameState {
     String uid, status;
     bool   readerOk = false, scaleOk = false;
     int    rssi = 1;
+    String ava = "\x01";   // sentinel: never equal to a real URL, so the first frame always sends it
 };
 
 // Delta-compressed like upstream: a field is present only when it changed.
@@ -227,7 +228,7 @@ struct FrameState {
 // under one BLE notification (MTU 185) by dropping the Wi-Fi-only extras and
 // adding the IP, so the app can switch to Wi-Fi by itself.
 static String buildFrame(bool full, FrameState &st, bool compact = false) {
-    StaticJsonDocument<768> d;
+    StaticJsonDocument<1024> d;
 
     putField<int>   (d, "weight",          shownWeight,        st.weight,   full);
     putField<String>(d, "uid",             uid,                st.uid,      full);
@@ -235,6 +236,8 @@ static String buildFrame(bool full, FrameState &st, bool compact = false) {
     putField<bool>  (d, "reader_ok",       reader.ok,          st.readerOk, full);
     putField<bool>  (d, "scale_ok",        scaleOk,            st.scaleOk,  full);
     if (!compact) {
+        String ava = fbAvatarUrl();
+        putField<String>(d, "fb_avatar", ava, st.ava, full);
         int rssi = (int)WiFi.RSSI();
         putField<int>(d, "wifi_signal_dbm", rssi,              st.rssi,     full);
     }
@@ -410,6 +413,19 @@ static void bleFlushOne() {
     bleQueue[--bleQueued] = "";
 }
 
+// The avatar URL can be longer than one notification, so it goes in numbered chunks:
+// {"fba":N,"fbi":i,"fbd":"..."}  (N chunks in total); {"fba":0} means "no avatar".
+static void enqueueAvatar(const String &url) {
+    if (url.isEmpty()) { bleEnqueue("{\"fba\":0}"); return; }
+    const int CH = 100;
+    int n = (url.length() + CH - 1) / CH;
+    for (int i = 0; i < n; i++) {
+        StaticJsonDocument<256> d;
+        d["fba"] = n; d["fbi"] = i; d["fbd"] = url.substring(i * CH, min((int)url.length(), (i + 1) * CH));
+        String out; serializeJson(d, out); bleEnqueue(out);
+    }
+}
+
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
         bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState();
@@ -445,7 +461,14 @@ static void pumpBle(bool periodicFull) {
     putField<String>(fb, "fbe", fbe, lFbe, full);
     putField<String>(fb, "fbn", fbn, lFbn, full);
     putField<String>(fb, "fber", fber, lFber, full);
+    static String lFbc;
+    String fbc = fbAvatarColor();
+    putField<String>(fb, "fbc", fbc, lFbc, full);
     if (fb.size()) { String out; serializeJson(fb, out); bleEnqueue(out); }
+
+    static String lAva = "\x01";
+    String ava = fbAvatarUrl();
+    if (full || ava != lAva) { lAva = ava; enqueueAvatar(ava); }
 
     bleFlushOne();
 }
