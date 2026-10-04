@@ -54,6 +54,13 @@ static const RfLevel RF_LEVELS[] = {
 static const uint8_t RF_LEVEL_COUNT = sizeof(RF_LEVELS) / sizeof(RF_LEVELS[0]);
 static uint8_t rfPow = 3;
 
+// What a TigerTag keeps in pages 5..8: product, material (bytes 4-5), brand (10-11) and colour (12-14).
+struct TagMeta {
+    bool valid = false;
+    uint16_t brand = 0, material = 0;
+    uint8_t r = 0, g = 0, b = 0;
+};
+
 class Reader {
 public:
     Reader(uint8_t rst, HardwareSerial &ser, int8_t rx, int8_t tx)
@@ -107,6 +114,23 @@ public:
         return true;
     }
 
+    // Reads the TigerTag fields right after poll() selected the tag. Short retry, as the original does.
+    bool readMeta(TagMeta &m) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (attempt) delay(attempt == 1 ? 10 : 60);
+            uint8_t d[16];
+            bool good = true;
+            for (uint8_t i = 0; i < 4 && good; i++) good = _pn.mifareultralight_ReadPage(5 + i, d + 4 * i);
+            if (!good) continue;
+            m.material = (uint16_t)((d[4] << 8) | d[5]);
+            m.brand = (uint16_t)((d[10] << 8) | d[11]);
+            m.r = d[12]; m.g = d[13]; m.b = d[14];
+            m.valid = true;
+            return true;
+        }
+        return false;
+    }
+
     bool ok = false;
     uint32_t version = 0;
 private:
@@ -132,6 +156,8 @@ static uint32_t lastScaleOkMs = 0;
 
 static String  uid;        // tag latched by the workflow (the original's lastUID), shown everywhere
 static String  tagLive;    // tag the reader sees right now
+static TagMeta tagMeta;    // brand / material / colour of the tag being handled
+static String  metaUid;    // tag tagMeta was read from
 static volatile bool rfTest = false;      // RFID test screen open: poll faster, keep the last UID
 static String  testUid;                    // sticky: stays after the tag is removed, until reset
 static volatile int pendRfPow = -1;
@@ -144,6 +170,9 @@ static uint32_t stableSince = 0;
 // Commands from HTTP handlers; executed in loop() because tare/calibration
 // block for ~1 s on the HX711 and must not run on the async_tcp task.
 static volatile bool  pendTare = false;
+static volatile float pendCalFactor = 0;
+static volatile bool  pendWfStop = false;
+static volatile uint32_t pendRestartAt = 0;
 static volatile float pendCalGrams = 0;
 static volatile bool  pendWifi = false, pendScan = false;
 static String         pendSsid, pendPass;
@@ -208,6 +237,7 @@ static void updateStatus() {
     wfUpdate(in, out);
     if (out.tare) pendTare = true;
     uid = wfUid();
+    if (uid.isEmpty() && tagLive.isEmpty() && metaUid.length()) { metaUid = ""; tagMeta = TagMeta(); }
     scaleStatus = wfStatus();
 }
 
@@ -217,7 +247,16 @@ static void pollRfid() {
     if (millis() - last < (rfTest ? RFID_TEST_POLL_MS : RFID_POLL_MS)) return;
     last = millis();
     String u;
-    if (reader.ok && reader.poll(u)) { tagLive = u; seenMs = millis(); if (rfTest) testUid = u; }
+    if (reader.ok && reader.poll(u)) {
+        tagLive = u; seenMs = millis();
+        if (rfTest) testUid = u;
+        if (u != metaUid) {                       // new tag: read its brand / material / colour once
+            metaUid = u;
+            TagMeta m;
+            tagMeta = reader.readMeta(m) ? m : TagMeta();
+            if (tagMeta.valid) Serial.printf("[RFID] brand=%u material=%u colour=%02X%02X%02X\n", tagMeta.brand, tagMeta.material, tagMeta.r, tagMeta.g, tagMeta.b);
+        }
+    }
     if (tagLive.length() && millis() - seenMs > RFID_LOST_MS) tagLive = "";
 }
 
@@ -268,7 +307,7 @@ static String buildFrame(bool full, FrameState &st, bool compact = false) {
 }
 
 // RFID test state, sent as its own small frame so the core frames stay under one BLE MTU.
-struct RfState { int pow = -1; int test = -1; String uid, ver; bool first = true; };
+struct RfState { int pow = -1; int test = -1; String uid, ver, tc; int tb = -2, tm = -2; bool first = true; };
 
 static String buildRfFrame(bool full, RfState &st) {
     StaticJsonDocument<192> d;
@@ -278,6 +317,14 @@ static String buildRfFrame(bool full, RfState &st) {
     putField<int>(d, "rf_test", test, st.test, full);
     putField<String>(d, "rf_uid", testUid, st.uid, full);
     putField<String>(d, "rf_ver", ver, st.ver, full);
+    // TigerTag brand / material ids and colour (the app turns the ids into names)
+    int tb = tagMeta.valid ? tagMeta.brand : -1, tm = tagMeta.valid ? tagMeta.material : -1;
+    char hex[8] = "";
+    if (tagMeta.valid) snprintf(hex, sizeof hex, "%02X%02X%02X", tagMeta.r, tagMeta.g, tagMeta.b);
+    String tc = hex;
+    putField<int>(d, "tb", tb, st.tb, full);
+    putField<int>(d, "tm", tm, st.tm, full);
+    putField<String>(d, "tc", tc, st.tc, full);
     if (d.size() == 0) return "";
     String out; serializeJson(d, out); return out;
 }
@@ -563,6 +610,30 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html><meta name=viewpo
 c.onmessage=e=>{Object.assign(st,JSON.parse(e.data));w.textContent=st.weight+' g';
 s.textContent=st.scaleStatus;u.textContent=st.uid||''};</script>)HTML";
 
+// Commands from Tiger Studio Manager. Runs on the cloud task, so it only sets flags that loop() acts on.
+static String onRemoteCommand(const String &type, float value, bool &ok) {
+    if (type == "tare") { pendTare = true; return "Tare done"; }
+    if (type == "workflow_stop") { pendWfStop = true; return "Workflow stopped"; }
+    if (type == "rfid_test_start") { testUid = ""; rfTest = true; return "RFID test started"; }
+    if (type == "rfid_test_stop") { rfTest = false; testUid = ""; return "RFID test stopped"; }
+    if (type == "heartbeat_now") { fbForceBeat(); return "Heartbeat sent"; }
+    if (type == "calibration_set") {
+        if (value == 0.0f) { ok = false; return "Missing calibration factor"; }
+        pendCalFactor = value;
+        return "Calibration updated";
+    }
+    if (type == "restart") { pendRestartAt = millis() + 1500; return "Restarting..."; }
+    if (type == "factory_reset") {
+        prefs.begin("scale", false); prefs.clear(); prefs.end();
+        fbLogout();
+        WiFi.disconnect(true, true);
+        pendRestartAt = millis() + 1500;
+        return "Reset, restarting...";
+    }
+    ok = false;
+    return String("Not supported by this firmware: ") + type;
+}
+
 static void setupRoutes() {
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     ws.onEvent(onWsEvent);
@@ -662,6 +733,7 @@ void setup() {
     {
         char macHex[13];
         snprintf(macHex, sizeof macHex, "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        fbSetCommandHandler(onRemoteCommand);
         fbBegin(macHex);
     }
     setupRoutes();
@@ -673,6 +745,13 @@ void loop() {
     static uint32_t lastWs = 0, lastFull = 0;
 
     if (pendTare)           { pendTare = false; doTare(); }
+    if (pendWfStop)         { pendWfStop = false; wfStop(); }
+    if (pendCalFactor != 0) {
+        calFactor = pendCalFactor; pendCalFactor = 0;
+        scale.set_scale(calFactor);
+        prefs.begin("scale", false); prefs.putFloat("cal", calFactor); prefs.end();
+    }
+    if (pendRestartAt && (int32_t)(millis() - pendRestartAt) >= 0) ESP.restart();
     if (pendCalGrams > 0)   { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
 
     if (digitalRead(BOOT_BTN) == LOW) bootBtnMs = millis() ? millis() : 1;

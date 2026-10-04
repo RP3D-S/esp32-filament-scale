@@ -26,6 +26,7 @@ static String gEmail, gName, gError;
 static String gUid, gIdToken, gRefresh;
 static String gColor;                     // account colour as RRGGBB (the original draws initials on it)
 static FbSpool gSpool;
+static FbCommandHandler gCmdHandler = nullptr;
 static volatile uint32_t gSendId = 0;
 static volatile int gSendResult = 0;         // 0 none, 1 in flight, 2 ok, 3 failed
 static volatile bool gSendPending = false;
@@ -395,6 +396,88 @@ static void fetchSpool(const String &uidHex) {
     xSemaphoreTake(gLock, portMAX_DELAY); gSpool = s; xSemaphoreGive(gLock);
 }
 
+// ---- remote commands -------------------------------------------------------------------
+struct RemoteCmd { String id, status, type; float value = 0; };
+
+// Streams the commands collection listing: one `"name": ".../commands/ID"` line starts each document.
+class CommandScanner : public Stream {
+public:
+    RemoteCmd cmds[8];
+    int n = 0;
+    String line, lastKey;
+    size_t write(uint8_t c) override {
+        if (c == '\n') { process(); line = ""; }
+        else if (c != '\r' && line.length() < 500) line += (char)c;
+        return 1;
+    }
+    size_t write(const uint8_t *b, size_t k) override { for (size_t i = 0; i < k; i++) write(b[i]); return k; }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    void flush() override {}
+
+private:
+    RemoteCmd *cur = nullptr;
+    void process() {
+        String t = line; t.trim();
+        if (t.startsWith("\"name\":") && t.indexOf("/commands/") > 0) {
+            int s = t.indexOf("/commands/") + 10;
+            int e = t.indexOf('"', s);
+            if (n < 8 && e > s) { cur = &cmds[n++]; cur->id = t.substring(s, e); }
+            else cur = nullptr;
+            return;
+        }
+        if (t.endsWith("{") && t.startsWith("\"")) {
+            int e = t.indexOf('"', 1);
+            if (e > 1) lastKey = t.substring(1, e);
+            return;
+        }
+        if (!cur) return;
+        int c = t.indexOf(':');
+        if (c < 0) return;
+        String v = t.substring(c + 1); v.trim();
+        if (v.endsWith(",")) v.remove(v.length() - 1);
+        if (v.length() >= 2 && v[0] == '"') v = v.substring(1, v.length() - 1);
+        if (t.startsWith("\"stringValue\"")) {
+            if (lastKey == "status") cur->status = v;
+            else if (lastKey == "type") cur->type = v;
+        } else if (t.startsWith("\"integerValue\"") || t.startsWith("\"doubleValue\"")) {
+            if (lastKey == "factor" || lastKey == "value") cur->value = v.toFloat();
+        }
+    }
+};
+
+static bool patchCommand(const String &id, const char *status, int progress, const String &message) {
+    String url = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid +
+                 "/scales/" + gMac + "/commands/" + id +
+                 "?updateMask.fieldPaths=status&updateMask.fieldPaths=progress&updateMask.fieldPaths=message";
+    StaticJsonDocument<384> d;
+    d["fields"]["status"]["stringValue"] = status;
+    d["fields"]["progress"]["integerValue"] = String(progress);
+    d["fields"]["message"]["stringValue"] = message;
+    String body; serializeJson(d, body);
+    String resp;
+    int code = request("PATCH", url, body, "application/json", gIdToken, resp);
+    return code >= 200 && code < 300;
+}
+
+static void pollCommands() {
+    CommandScanner sc;
+    int code = -1;
+    String url = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid +
+                 "/scales/" + gMac + "/commands?pageSize=8";
+    if (!streamGet(url, sc, code) || code != 200) return;   // 404: no commands collection yet
+    for (int i = 0; i < sc.n; i++) {
+        RemoteCmd &c = sc.cmds[i];
+        if (c.status != "pending") continue;
+        Serial.printf("[FB] command %s type=%s\n", c.id.c_str(), c.type.c_str());
+        patchCommand(c.id, "ack", 0, "Acknowledged");
+        bool ok = true;
+        String msg = gCmdHandler ? gCmdHandler(c.type, c.value, ok) : String("no handler");
+        patchCommand(c.id, ok ? "done" : "error", ok ? 100 : 0, msg);
+    }
+}
+
 // ---- weight write (the original's updateScaleLastSpool) --------------------------------
 static String isoNow() {
     time_t t = time(nullptr);
@@ -520,6 +603,7 @@ static void fbTask(void *) {
     bool needFull = true;
     String lastUid;
     String spoolUid;   // tag the inventory info belongs to
+    uint32_t lastCmdPoll = 0;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(400));
@@ -570,6 +654,11 @@ static void fbTask(void *) {
 
         if (gNeedProfile) {
             if (fetchProfile() || ++gProfileTries >= 3) gNeedProfile = false;
+        }
+
+        if (millis() - lastCmdPoll >= 15000) {
+            lastCmdPoll = millis();
+            pollCommands();
         }
 
         // Heartbeat every 30 s, or at once when the tag changes.
@@ -652,6 +741,9 @@ int fbSendStatus(uint32_t id) {
     if (id != gSendId) return 3;
     return gSendResult;
 }
+
+void fbSetCommandHandler(FbCommandHandler h) { gCmdHandler = h; }
+void fbForceBeat() { gForceBeat = true; }
 
 FbSpool fbSpool() {
     FbSpool s;

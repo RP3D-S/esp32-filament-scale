@@ -29,6 +29,10 @@ data class ScaleState(
     val fbNeedsBoot: Boolean = false,
     /** Account avatar: photo URL (may be empty) and the account colour as RRGGBB for the initials circle */
     val avatarUrl: String = "",
+    /** TigerTag brand / material ids (-1 unknown) and colour as RRGGBB, read from the tag on the platform */
+    val tagBrand: Int = -1,
+    val tagMaterial: Int = -1,
+    val tagColor: String = "",
     /** Spool on the platform, read from the account's inventory: empty-spool weight (-1 unknown), rack name and slot */
     val container: Int = -1,
     val rackName: String = "",
@@ -74,6 +78,9 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     container = if (j.has("cw")) j.optInt("cw", -1) else container,
     rackName = if (j.has("rk")) j.optString("rk") else rackName,
     rackPos = if (j.has("rp")) j.optString("rp") else rackPos,
+    tagBrand = if (j.has("tb")) j.optInt("tb", -1) else tagBrand,
+    tagMaterial = if (j.has("tm")) j.optInt("tm", -1) else tagMaterial,
+    tagColor = if (j.has("tc")) j.optString("tc") else tagColor,
     avatarUrl = if (j.has("fb_avatar")) j.optString("fb_avatar") else avatarUrl,
     avatarColor = if (j.has("fbc")) j.optString("fbc") else avatarColor,
     fbNeedsBoot = if (j.has("fb_err")) true else if (j.has("fbs")) false else fbNeedsBoot,

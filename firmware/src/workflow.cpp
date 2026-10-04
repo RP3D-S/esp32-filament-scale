@@ -58,6 +58,18 @@ static float    sendNet = 0;
 
 static uint32_t negSinceMs = 0, lastNegTareMs = 0;
 
+// Auto-tare when the platform is emptied: the original arms it after the weight went above 12 g,
+// fires it when the weight falls under 5 g, then waits for the weight to sit within 8 g of zero
+// for 1.2 s (10 s timeout) before taring.
+static const float    IDLE_AUTOTARE_TRIGGER_G   = 5.0f;
+static const float    IDLE_AUTOTARE_REARM_G     = 12.0f;
+static const uint32_t IDLE_AUTOTARE_COOLDOWN_MS = 5000;
+static const float    AUTO_TARE_EMPTY_THRESHOLD_G = 8.0f;
+static const uint32_t AUTO_TARE_STABLE_MS       = 1200;
+static const uint32_t AUTO_TARE_TIMEOUT_MS      = 10000;
+static bool     idleArmed = false, autoTarePending = false;
+static uint32_t lastIdleAutoTareMs = 0, autoTareStartMs = 0, autoTareStableSinceMs = 0;
+
 static const char *transient = "";          // banner shown for BANNER_MS: success error no_tag cancelled weigh_error
 static uint32_t transientUntilMs = 0;
 
@@ -115,8 +127,39 @@ void wfUpdate(const WfInputs &in, WfOutputs &out) {
     updateSlope(w, now);
     const bool removingNow = slope < SLOPE_REMOVAL_G_PER_S;
 
+    const bool idleAndEmpty = phase == P_IDLE && latched.isEmpty() && !autoTarePending;
+
+    // Idle auto-tare: arm after a load, trigger when it is gone.
+    if (idleAndEmpty) {
+        if (w > IDLE_AUTOTARE_REARM_G) idleArmed = true;
+        if (idleArmed && now - lastIdleAutoTareMs > IDLE_AUTOTARE_COOLDOWN_MS && w < IDLE_AUTOTARE_TRIGGER_G) {
+            autoTarePending = true;
+            autoTareStartMs = now;
+            autoTareStableSinceMs = 0;
+            idleArmed = false;
+            lastIdleAutoTareMs = now;
+            Serial.printf("[WF] auto-tare armed (w=%.1f)\n", w);
+        }
+    }
+    if (autoTarePending) {
+        if (now - autoTareStartMs > AUTO_TARE_TIMEOUT_MS) {
+            autoTarePending = false; autoTareStableSinceMs = 0;
+            Serial.println("[WF] auto-tare timed out");
+        } else if (fabsf(w) <= AUTO_TARE_EMPTY_THRESHOLD_G) {
+            if (!autoTareStableSinceMs) autoTareStableSinceMs = now;
+            else if (now - autoTareStableSinceMs >= AUTO_TARE_STABLE_MS) {
+                out.tare = true;
+                stats.autoTare++;
+                autoTarePending = false; autoTareStableSinceMs = 0;
+                Serial.println("[WF] auto-tare done");
+            }
+        } else {
+            autoTareStableSinceMs = 0;
+        }
+    }
+
     // Negative drift: weight below zero for a second means the zero has wandered. Tare.
-    if (w < 0) {
+    if (idleAndEmpty && w < 0) {
         if (!negSinceMs) negSinceMs = now;
         if (now - negSinceMs >= NEG_DRIFT_TARE_DELAY_MS && now - lastNegTareMs >= NEG_DRIFT_TARE_COOLDOWN_MS) {
             out.tare = true;
@@ -153,7 +196,7 @@ void wfUpdate(const WfInputs &in, WfOutputs &out) {
 
         bool confirmed = presentSinceMs && now - presentSinceMs >= SCAN_START_HOLD_MS;
         if (w >= SCAN_START_WEIGHT_G && confirmed && now >= rescanBlockedUntilMs &&
-            in.signedIn && in.wifiUp && !removingNow &&
+            in.signedIn && in.wifiUp && !removingNow && !autoTarePending &&
             ((strcmp(sendPhase, "ready") && strcmp(sendPhase, "done")) || readyWasZero)) {
             phase = P_SCANNING;
             scanStartMs = now;
@@ -298,6 +341,14 @@ void wfUpdate(const WfInputs &in, WfOutputs &out) {
 }
 
 String wfUid() { return latched; }
+
+void wfStop() {
+    phase = P_IDLE;
+    setSendPhase("idle", millis());
+    clearSession();
+    stats.resets++;
+    Serial.println("[WF] stopped by remote command");
+}
 
 const char *wfStatus() {
     if (transient[0] && millis() < transientUntilMs) return transient;

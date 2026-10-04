@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Brush
@@ -195,16 +196,28 @@ fun ScaleDisplay(
                 color = TEXT, fontSize = f(40f), textAlign = TextAlign.Center, maxLines = 1,
             )
 
+            // Brand + material read from the tag (the original's brand card): colour dot, brand name,
+            // material underneath. "--" until the names are known.
             if (tagActive) {
+                val brandName by produceState("--", s.tagBrand) {
+                    value = if (s.tagBrand < 0) "--" else TigerTagDb.brand(s.tagBrand)
+                }
+                val materialName by produceState("--", s.tagMaterial) {
+                    value = if (s.tagMaterial < 0) "--" else TigerTagDb.material(s.tagMaterial)
+                }
+                val dot = runCatching { Color(android.graphics.Color.parseColor("#" + s.tagColor)) }.getOrDefault(Color(0xFF556070))
                 Column(
                     Modifier.offset(0.dp, d(72f)).width(d(224f)),
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(d(2f)),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(d(8f))) {
-                        Box(Modifier.size(d(20f)).clip(CircleShape).background(Color(0xFF556070)))
-                        Text(s.uid, color = TEXT, fontSize = f(16f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.width(d(170f)))
+                        Box(Modifier.size(d(20f)).clip(CircleShape).background(dot))
+                        Text(brandName, color = TEXT, fontSize = f(20f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = d(190f)))
                     }
+                    Text(materialName, color = MUTED, fontSize = f(16f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center, modifier = Modifier.width(d(224f)))
                 }
             }
 

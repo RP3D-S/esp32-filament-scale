@@ -62,5 +62,14 @@ uint32_t fbSendWeight(const String &uid, const String &twin, int netGrams);
 /** 1 in flight, 2 done, 3 failed (also for an id that was superseded). */
 int fbSendStatus(uint32_t id);
 
+/**
+ * Remote commands from Tiger Studio Manager (users/{uid}/scales/{mac}/commands). The handler runs on
+ * the cloud task: it must only set flags. `ok` false marks the command as failed; the returned
+ * text is the message shown in Studio.
+ */
+typedef String (*FbCommandHandler)(const String &type, float value, bool &ok);
+void fbSetCommandHandler(FbCommandHandler h);
+void fbForceBeat();
+
 /** Account colour as RRGGBB (from the user's profile), empty when signed out. */
 String fbAvatarColor();

@@ -58,6 +58,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     private var wantWifi = false
 
     init {
+        TigerTagDb.init(app)
         ble.setTarget(savedAddr)
         if (_state.value.host.isNotBlank()) connectWifi() else search()
     }

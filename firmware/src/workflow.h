@@ -41,5 +41,8 @@ const char *wfStatus();
 const char *wfPhaseName();
 const char *wfSendPhase();
 
+/** Remote "workflow_stop": drop the session and go back to idle. */
+void wfStop();
+
 WfStats wfStats();
 WfLast  wfLast();
