@@ -58,6 +58,7 @@ class ScaleBle(
 
     private val scanCb = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            if (!scanning) return   // results can still arrive after stopScan(); one connection only
             stopScan()
             connect(result.device)
         }
@@ -112,7 +113,10 @@ class ScaleBle(
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) linked(true)
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                ready = true
+                linked(true)
+            }
         }
 
         // API 33+: value delivered directly.
@@ -162,8 +166,24 @@ class ScaleBle(
         runCatching { adapter?.bluetoothLeScanner?.stopScan(scanCb) }
     }
 
+    private var ready = false
+
     private fun connect(dev: BluetoothDevice) {
-        gatt = dev.connectGatt(ctx, false, gattCb, BluetoothDevice.TRANSPORT_LE)
+        ready = false
+        val g = dev.connectGatt(ctx, false, gattCb, BluetoothDevice.TRANSPORT_LE)
+        gatt = g
+        // A connection that never completes (scale rebooting, stale bond, radio busy) must not
+        // leave us stuck holding a dead GATT object: give up and scan again.
+        main.postDelayed({
+            if (wanted && gatt === g && !ready) {
+                g.disconnect()
+                g.close()
+                gatt = null
+                cmdChar = null
+                secChar = null
+                retryLater()
+            }
+        }, 15_000)
     }
 
     private fun retryLater() {
