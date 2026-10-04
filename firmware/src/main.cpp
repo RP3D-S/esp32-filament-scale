@@ -105,7 +105,11 @@ public:
     bool poll(String &out) {
         uint8_t buf[255] = {0};   // library trusts the frame's length byte; leave room
         uint8_t len = 0;
-        bool found = _pn.readPassiveTargetID(PN532_MIFARE_ISO14443A, buf, &len, 30);
+        drain();
+        // 150 ms, not 30: the PN532 answers a detection late on a real spool. A reply that arrives after
+        // the library gave up stays in the UART and is read as the ACK of the next command, which
+        // desynchronises everything (seen as "No ACK frame received" on the page reads).
+        bool found = _pn.readPassiveTargetID(PN532_MIFARE_ISO14443A, buf, &len, 150);
         if (!found || (len != 4 && len != 7 && len != 10)) return false;
         out = "";
         for (uint8_t i = 0; i < len; i++) {
@@ -118,10 +122,22 @@ public:
     bool readMeta(TagMeta &m) {
         for (int attempt = 0; attempt < 3; attempt++) {
             if (attempt) delay(attempt == 1 ? 10 : 60);
+            drain();
             uint8_t d[16];
             bool good = true;
-            for (uint8_t i = 0; i < 4 && good; i++) good = _pn.mifareultralight_ReadPage(5 + i, d + 4 * i);
-            if (!good) continue;
+            uint8_t failedPage = 0;
+            for (uint8_t i = 0; i < 4 && good; i++) {
+                good = _pn.mifareultralight_ReadPage(5 + i, d + 4 * i);
+                if (!good) failedPage = 5 + i;
+            }
+            if (!good) {
+                static int shown = 0;
+                if (shown++ < 4) Serial.printf("[RFID] ReadPage(%u) failed\n", failedPage);
+                continue;
+            }
+            Serial.printf("[RFID] pages 5-8: ");
+            for (int k = 0; k < 16; k++) Serial.printf("%02X ", d[k]);
+            Serial.println();
             m.material = (uint16_t)((d[4] << 8) | d[5]);
             m.brand = (uint16_t)((d[10] << 8) | d[11]);
             m.r = d[12]; m.g = d[13]; m.b = d[14];
@@ -130,6 +146,9 @@ public:
         }
         return false;
     }
+
+    // Throws away anything left in the UART so the next ACK is read from a clean stream.
+    void drain() { while (_ser.available()) _ser.read(); }
 
     bool ok = false;
     uint32_t version = 0;
@@ -250,11 +269,19 @@ static void pollRfid() {
     if (reader.ok && reader.poll(u)) {
         tagLive = u; seenMs = millis();
         if (rfTest) testUid = u;
-        if (u != metaUid) {                       // new tag: read its brand / material / colour once
-            metaUid = u;
+        // Brand / material / colour live in the tag's pages 5-8. A single failed read must not mean "no
+        // data for this tag": keep trying (a few times) while the tag is in the field.
+        static int metaTries = 0;
+        if (u != metaUid) { metaUid = u; metaTries = 0; tagMeta = TagMeta(); }
+        if (!tagMeta.valid && metaTries < 12) {
+            metaTries++;
             TagMeta m;
-            tagMeta = reader.readMeta(m) ? m : TagMeta();
-            if (tagMeta.valid) Serial.printf("[RFID] brand=%u material=%u colour=%02X%02X%02X\n", tagMeta.brand, tagMeta.material, tagMeta.r, tagMeta.g, tagMeta.b);
+            if (reader.readMeta(m)) {
+                tagMeta = m;
+                Serial.printf("[RFID] tag %s brand=%u material=%u colour=%02X%02X%02X\n", u.c_str(), m.brand, m.material, m.r, m.g, m.b);
+            } else if (metaTries == 1 || metaTries == 12) {
+                Serial.printf("[RFID] tag %s: could not read pages 5-8 (try %d)\n", u.c_str(), metaTries);
+            }
         }
     }
     if (tagLive.length() && millis() - seenMs > RFID_LOST_MS) tagLive = "";
