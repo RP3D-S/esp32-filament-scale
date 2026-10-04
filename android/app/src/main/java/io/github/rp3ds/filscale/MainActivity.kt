@@ -77,6 +77,8 @@ class MainActivity : ComponentActivity() {
                         onWifi = vm::configureWifi,
                         onFbLogin = vm::loginFirebase,
                         onFbLogout = vm::logoutFirebase,
+                        onRfidTest = vm::rfidTest,
+                        onRfPower = vm::rfPower,
                     )
                 }
             }
@@ -95,6 +97,8 @@ fun ScaleScreen(
     onWifi: (String, String) -> Unit,
     onFbLogin: (String, String) -> Unit,
     onFbLogout: () -> Unit,
+    onRfidTest: (Boolean) -> Unit,
+    onRfPower: (Int) -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
 
@@ -109,7 +113,7 @@ fun ScaleScreen(
     }
 
     if (showSettings) {
-        SettingsDialog(s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout)
+        SettingsDialog(s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout, onRfidTest, onRfPower)
     }
 }
 
@@ -124,11 +128,14 @@ private fun SettingsDialog(
     onWifi: (String, String) -> Unit,
     onFbLogin: (String, String) -> Unit,
     onFbLogout: () -> Unit,
+    onRfidTest: (Boolean) -> Unit,
+    onRfPower: (Int) -> Unit,
 ) {
     var showCal by remember { mutableStateOf(false) }
     var showHost by remember { mutableStateOf(false) }
     var showWifi by remember { mutableStateOf(false) }
     var showFb by remember { mutableStateOf(false) }
+    var showRfid by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -181,6 +188,9 @@ private fun SettingsDialog(
                 OutlinedButton(onClick = { showFb = true }, enabled = s.bleLinked, modifier = Modifier.fillMaxWidth()) {
                     Text(if (s.fbState == 2) "Conta TigerTag" else "Ligar conta TigerTag")
                 }
+                OutlinedButton(onClick = { showRfid = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
+                    Text("Teste RFID")
+                }
                 OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
                     Text("Calibrar")
                 }
@@ -194,6 +204,7 @@ private fun SettingsDialog(
     )
 
     if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
+    if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
     if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
     if (showCal) CalibrateDialog({ showCal = false }) { onCalibrate(it); showCal = false }

@@ -125,6 +125,20 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendSecure("""{"cmd":"fb_logout"}""")
     }
 
+    /** RFID test screen: start/stop polling in test mode (keeps the last UID on the scale). */
+    fun rfidTest(on: Boolean) = command(
+        "/api/rfid/test",
+        if (on) "{}" else """{"stop":true}""",
+        """{"cmd":"rfid_test","on":$on}""",
+    )
+
+    /** RF power level 0..4, applied live and saved on the scale. */
+    fun rfPower(level: Int) {
+        val l = level.coerceIn(0, 4)
+        _state.update { it.copy(rfPow = l) }
+        command("/api/rfid/test", """{"power":$l}""", """{"cmd":"rf_power","level":$l}""")
+    }
+
     private fun command(path: String, httpBody: String, bleBody: String) {
         val s = _state.value
         when {

@@ -27,6 +27,11 @@ data class ScaleState(
     val fbName: String = "",
     val fbError: String = "",
     val fbNeedsBoot: Boolean = false,
+    /** RFID test screen: RF power level 0..4, test mode on, last UID read, PN532 version */
+    val rfPow: Int = 3,
+    val rfTest: Boolean = false,
+    val rfUid: String = "",
+    val rfVer: String = "",
     val searching: Boolean = false,
     val message: String? = null,
 ) {
@@ -55,5 +60,9 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     fbName = if (j.has("fbn")) j.optString("fbn") else fbName,
     fbError = if (j.has("fber")) j.optString("fber") else fbError,
     fbNeedsBoot = if (j.has("fb_err")) true else if (j.has("fbs")) false else fbNeedsBoot,
+    rfPow = if (j.has("rf_pow")) j.optInt("rf_pow") else rfPow,
+    rfTest = if (j.has("rf_test")) j.optInt("rf_test") == 1 else rfTest,
+    rfUid = if (j.has("rf_uid")) j.optString("rf_uid") else rfUid,
+    rfVer = if (j.has("rf_ver")) j.optString("rf_ver") else rfVer,
     wifiNeedsBoot = if (j.has("wifi_err")) true else if (j.has("wst")) false else wifiNeedsBoot,
 )

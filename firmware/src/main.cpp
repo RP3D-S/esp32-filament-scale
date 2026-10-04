@@ -31,6 +31,7 @@
 static const uint32_t WS_INTERVAL_MS      = 100;
 static const uint32_t WS_FULL_INTERVAL_MS = 30000;
 static const uint32_t RFID_POLL_MS        = 250;
+static const uint32_t RFID_TEST_POLL_MS   = 100;
 static const uint32_t RFID_LOST_MS        = 1500;   // tag gone after this long unseen
 static const float    PRESENT_G           = 10.0f;
 static const float    EMA_SLOW            = 0.15f;
@@ -39,6 +40,19 @@ static const float    FAST_DELTA_G        = 5.0f;
 static const uint32_t STABLE_MS           = 1200;
 
 // ---- PN532 over HSU -------------------------------------------------------
+// RF transmit power / receive sensitivity, same five levels as the original scale
+// (its Hardware/RFID test screen steps through them). Level 0 is TX almost off.
+struct RfLevel { uint8_t gsNOn, cwGsP, modGsP, rxMinLevel; };
+static const RfLevel RF_LEVELS[] = {
+    { 0x00, 0x00, 0x00, 0xF },
+    { 0x10, 0x04, 0x01, 0xE },
+    { 0x20, 0x08, 0x02, 0xD },
+    { 0x30, 0x0C, 0x03, 0xC },
+    { 0x40, 0x10, 0x04, 0xB },
+};
+static const uint8_t RF_LEVEL_COUNT = sizeof(RF_LEVELS) / sizeof(RF_LEVELS[0]);
+static uint8_t rfPow = 3;
+
 class Reader {
 public:
     Reader(uint8_t rst, HardwareSerial &ser, int8_t rx, int8_t tx)
@@ -49,9 +63,34 @@ public:
         // pins have to be claimed first.
         _ser.begin(115200, SERIAL_8N1, _rx, _tx);
         _pn.begin();
-        ok = _pn.getFirmwareVersion() != 0;
-        if (ok) { _pn.SAMConfig(); _pn.setPassiveActivationRetries(1); }
+        version = _pn.getFirmwareVersion();
+        ok = version != 0;
+        if (ok) { _pn.SAMConfig(); _pn.setPassiveActivationRetries(1); applyRfPower(rfPow); }
         return ok;
+    }
+
+    // Applied live, no re-init needed. A command sent right behind another is not always
+    // acknowledged on this hardware, so settle first and retry once (as the original does).
+    void applyRfPower(uint8_t level) {
+        if (!ok) return;
+        if (level >= RF_LEVEL_COUNT) level = RF_LEVEL_COUNT - 1;
+        const RfLevel &lv = RF_LEVELS[level];
+        uint8_t cmd[13] = {
+            PN532_COMMAND_RFCONFIGURATION, 0x0A, 0x59, lv.gsNOn, lv.cwGsP, lv.modGsP,
+            0x4D, (uint8_t)((lv.rxMinLevel << 4) | 0x5), 0x61, 0x6F, 0x26, 0x62, 0x87,
+        };
+        delay(20);
+        if (!_pn.sendCommandCheckAck(cmd, sizeof(cmd), 500)) {
+            delay(40);
+            _pn.sendCommandCheckAck(cmd, sizeof(cmd), 500);
+        }
+    }
+
+    // "PN532 v1.6" from the firmware-version word (IC, ver, rev, support).
+    String versionText() const {
+        if (!version) return "";
+        char b[24]; snprintf(b, sizeof b, "PN5%02X v%u.%u", (unsigned)(version >> 24), (unsigned)((version >> 16) & 0xFF), (unsigned)((version >> 8) & 0xFF));
+        return b;
     }
 
     // Returns true and fills `out` with an uppercase hex UID when a tag is present.
@@ -68,6 +107,7 @@ public:
     }
 
     bool ok = false;
+    uint32_t version = 0;
 private:
     Adafruit_PN532 _pn;
     HardwareSerial &_ser;
@@ -90,6 +130,9 @@ static bool    scaleOk = false;
 static uint32_t lastScaleOkMs = 0;
 
 static String  uid;
+static volatile bool rfTest = false;      // RFID test screen open: poll faster, keep the last UID
+static String  testUid;                    // sticky: stays after the tag is removed, until reset
+static volatile int pendRfPow = -1;
 static uint32_t seenMs = 0;
 
 static String  scaleStatus = "idle";
@@ -158,10 +201,10 @@ static void updateStatus() {
 // ---- RFID -----------------------------------------------------------------
 static void pollRfid() {
     static uint32_t last = 0;
-    if (millis() - last < RFID_POLL_MS) return;
+    if (millis() - last < (rfTest ? RFID_TEST_POLL_MS : RFID_POLL_MS)) return;
     last = millis();
     String u;
-    if (reader.ok && reader.poll(u)) { uid = u; seenMs = millis(); }
+    if (reader.ok && reader.poll(u)) { uid = u; seenMs = millis(); if (rfTest) testUid = u; }
     if (uid.length() && millis() - seenMs > RFID_LOST_MS) uid = "";
 }
 
@@ -208,7 +251,23 @@ static String buildFrame(bool full, FrameState &st, bool compact = false) {
     String out; serializeJson(d, out); return out;
 }
 
+// RFID test state, sent as its own small frame so the core frames stay under one BLE MTU.
+struct RfState { int pow = -1; int test = -1; String uid, ver; bool first = true; };
+
+static String buildRfFrame(bool full, RfState &st) {
+    StaticJsonDocument<192> d;
+    String ver = reader.versionText();
+    int pow = rfPow, test = rfTest ? 1 : 0;
+    putField<int>(d, "rf_pow", pow, st.pow, full);
+    putField<int>(d, "rf_test", test, st.test, full);
+    putField<String>(d, "rf_uid", testUid, st.uid, full);
+    putField<String>(d, "rf_ver", ver, st.ver, full);
+    if (d.size() == 0) return "";
+    String out; serializeJson(d, out); return out;
+}
+
 static FrameState wsState, bleState;
+static RfState wsRf, bleRf;
 
 // ---- BLE (NimBLE) ----------------------------------------------------------
 // Same JSON as the WebSocket, over one notify characteristic. Commands come back
@@ -266,6 +325,15 @@ public:
                 if (g > 0) pendCalGrams = g;
             } else if (!strcmp(cmd, "wifi_scan")) {
                 pendScan = true;
+            } else if (!strcmp(cmd, "rfid_test")) {
+                bool on = d["on"] | false;
+                if (on) testUid = "";
+                rfTest = on;
+            } else if (!strcmp(cmd, "rfid_reset")) {
+                testUid = "";
+            } else if (!strcmp(cmd, "rf_power")) {
+                int lv = d["level"] | -1;
+                if (lv >= 0 && lv < RF_LEVEL_COUNT) pendRfPow = lv;
             }
             return;
         }
@@ -322,10 +390,11 @@ static void setupBle() {
 static FrameState bleNetState;   // separate frame: network facts that would not fit the MTU
 
 static void pumpBle(bool periodicFull) {
-    if (!bleStateChr || bleClients == 0) { bleState = FrameState(); bleNetState = FrameState(); return; }
+    if (!bleStateChr || bleClients == 0) { bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); return; }
     bool full = periodicFull || bleNeedFull;
     bleNeedFull = false;
     bleSend(buildFrame(full, bleState, true));
+    bleSend(buildRfFrame(full, bleRf));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -386,6 +455,7 @@ static void onWsEvent(AsyncWebSocket *s, AsyncWebSocketClient *c, AwsEventType t
         d["uptime_s"] = millis() / 1000; d["fw_version"] = FW_VERSION;
         d["wifi_signal_dbm"] = (int)WiFi.RSSI(); d["cloud"] = true;
         d["mdns"] = mdnsName + ".local";
+        d["rf_pow"] = rfPow; d["rf_test"] = rfTest ? 1 : 0; d["rf_uid"] = testUid; d["rf_ver"] = reader.versionText();
         String out; serializeJson(d, out); c->text(out);
     }
     // Inbound frames are ignored; commands go over HTTP like upstream.
@@ -424,6 +494,26 @@ static void setupRoutes() {
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *r) { r->send(200, "text/html", INDEX_HTML); });
     server.on("/api/ping", HTTP_GET, [](AsyncWebServerRequest *r) { r->send(200, "text/plain", "pong"); });
     server.on("/api/status", HTTP_GET, sendStatusJson);
+    server.on("/api/rfid/test", HTTP_GET, [](AsyncWebServerRequest *r) {
+        StaticJsonDocument<256> d;
+        d["active"] = (bool)rfTest;
+        d["reader_right"] = reader.ok;
+        if (testUid.length()) d["uid_right"] = testUid; else d["uid_right"] = nullptr;
+        d["power"] = rfPow;
+        d["version"] = reader.versionText();
+        String out; serializeJson(d, out);
+        r->send(200, "application/json", out);
+    });
+    auto *rfPost = new AsyncCallbackJsonWebHandler("/api/rfid/test",
+        [](AsyncWebServerRequest *r, JsonVariant &j) {
+            if (j["stop"] | false) rfTest = false;
+            else if (j["reset"] | false) testUid = "";
+            else { testUid = ""; rfTest = true; }
+            int lv = j["power"] | -1;
+            if (lv >= 0 && lv < RF_LEVEL_COUNT) pendRfPow = lv;
+            r->send(200, "application/json", "{\"ok\":true}");
+        });
+    server.addHandler(rfPost);
     server.on("/api/tare", HTTP_POST, [](AsyncWebServerRequest *r) {
         pendTare = true; r->send(200, "application/json", "{\"ok\":true}");
     });
@@ -460,6 +550,8 @@ void setup() {
 
     prefs.begin("scale", true);
     calFactor    = prefs.getFloat("cal", calFactor);
+    rfPow        = prefs.getUChar("rfpow", rfPow);
+    if (rfPow >= RF_LEVEL_COUNT) rfPow = RF_LEVEL_COUNT - 1;
     long tare    = prefs.getLong("tare", 0);
     prefs.end();
 
@@ -503,6 +595,11 @@ void loop() {
     if (pendCalGrams > 0)   { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
 
     if (digitalRead(BOOT_BTN) == LOW) bootBtnMs = millis() ? millis() : 1;
+    if (pendRfPow >= 0) {
+        rfPow = pendRfPow; pendRfPow = -1;
+        prefs.begin("scale", false); prefs.putUChar("rfpow", rfPow); prefs.end();
+        reader.applyRfPower(rfPow);
+    }
     if (pendScan)           { pendScan = false; doWifiScan(); }
     if (pendWifi) {
         pendWifi = false;
@@ -542,8 +639,11 @@ void loop() {
         if (ws.count()) {
             String f = buildFrame(full, wsState);
             if (f.length()) ws.textAll(f);
+            String rf = buildRfFrame(full, wsRf);
+            if (rf.length()) ws.textAll(rf);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
+            wsRf = RfState();
         }
         ws.cleanupClients();
         pumpBle(full);
