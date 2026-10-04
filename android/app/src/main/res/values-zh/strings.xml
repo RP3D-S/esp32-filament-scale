@@ -67,5 +67,13 @@
     <string name="msg_failed">失败：%1$s</string>
     <string name="msg_no_link">未连接到秤</string>
     <string name="rfid_reader">读卡器</string>
+    <string name="scale_label">秤：</string>
+    <string name="scale_none">未选择</string>
+    <string name="btn_add_scale">添加或切换秤</string>
+    <string name="picker_title">选择你的秤</string>
+    <string name="picker_hint">附近通过蓝牙发现的秤。请将手机靠近你的秤：信号最强的就是最近的。</string>
+    <string name="picker_none_found">未找到秤。请确认已通电且距离较近。</string>
+    <string name="picker_nearest">最近</string>
+    <string name="btn_forget_scale">忘记此秤</string>
     <string name="language_system">跟随系统</string>
 </resources>

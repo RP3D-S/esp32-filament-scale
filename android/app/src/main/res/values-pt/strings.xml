@@ -67,5 +67,13 @@
     <string name="msg_failed">Falhou: %1$s</string>
     <string name="msg_no_link">Sem conexão com a balança</string>
     <string name="rfid_reader">LEITOR</string>
+    <string name="scale_label">"Balança: "</string>
+    <string name="scale_none">nenhuma escolhida</string>
+    <string name="btn_add_scale">Adicionar ou trocar de balança</string>
+    <string name="picker_title">Escolha a sua balança</string>
+    <string name="picker_hint">Balanças próximas por Bluetooth. Aproxime o telefone da sua: o sinal mais forte é o da mais próxima.</string>
+    <string name="picker_none_found">Nenhuma balança encontrada. Verifique se está ligada e por perto.</string>
+    <string name="picker_nearest">mais próxima</string>
+    <string name="btn_forget_scale">Esquecer esta balança</string>
     <string name="language_system">Padrão do sistema</string>
 </resources>

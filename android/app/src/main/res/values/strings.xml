@@ -67,5 +67,13 @@
     <string name="msg_failed">Failed: %1$s</string>
     <string name="msg_no_link">No connection to the scale</string>
     <string name="rfid_reader">READER</string>
+    <string name="scale_label">"Scale: "</string>
+    <string name="scale_none">none selected</string>
+    <string name="btn_add_scale">Add or switch scale</string>
+    <string name="picker_title">Choose your scale</string>
+    <string name="picker_hint">Nearby scales over Bluetooth. Hold the phone next to yours: the strongest signal is the closest.</string>
+    <string name="picker_none_found">No scales found. Check that it is powered on and close by.</string>
+    <string name="picker_nearest">closest</string>
+    <string name="btn_forget_scale">Forget this scale</string>
     <string name="language_system">System default</string>
 </resources>

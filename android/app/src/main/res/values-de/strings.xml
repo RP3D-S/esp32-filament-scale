@@ -67,5 +67,13 @@
     <string name="msg_failed">Fehlgeschlagen: %1$s</string>
     <string name="msg_no_link">Keine Verbindung zur Waage</string>
     <string name="rfid_reader">LESER</string>
+    <string name="scale_label">"Waage: "</string>
+    <string name="scale_none">keine ausgewählt</string>
+    <string name="btn_add_scale">Waage hinzufügen oder wechseln</string>
+    <string name="picker_title">Wähle deine Waage</string>
+    <string name="picker_hint">Waagen in der Nähe per Bluetooth. Halte das Telefon an deine: das stärkste Signal ist das nächste.</string>
+    <string name="picker_none_found">Keine Waage gefunden. Prüfe, ob sie eingeschaltet und in der Nähe ist.</string>
+    <string name="picker_nearest">am nächsten</string>
+    <string name="btn_forget_scale">Diese Waage vergessen</string>
     <string name="language_system">Systemstandard</string>
 </resources>

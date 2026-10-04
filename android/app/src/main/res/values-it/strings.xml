@@ -67,5 +67,13 @@
     <string name="msg_failed">Non riuscito: %1$s</string>
     <string name="msg_no_link">Nessuna connessione alla bilancia</string>
     <string name="rfid_reader">LETTORE</string>
+    <string name="scale_label">"Bilancia: "</string>
+    <string name="scale_none">nessuna selezionata</string>
+    <string name="btn_add_scale">Aggiungi o cambia bilancia</string>
+    <string name="picker_title">Scegli la tua bilancia</string>
+    <string name="picker_hint">Bilance vicine via Bluetooth. Avvicina il telefono alla tua: il segnale più forte è il più vicino.</string>
+    <string name="picker_none_found">Nessuna bilancia trovata. Controlla che sia accesa e vicina.</string>
+    <string name="picker_nearest">la più vicina</string>
+    <string name="btn_forget_scale">Dimentica questa bilancia</string>
     <string name="language_system">Predefinita di sistema</string>
 </resources>

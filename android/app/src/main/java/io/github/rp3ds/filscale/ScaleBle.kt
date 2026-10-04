@@ -32,8 +32,9 @@ import java.util.UUID
 @SuppressLint("MissingPermission")
 class ScaleBle(
     context: Context,
-    private val linked: (Boolean) -> Unit,
+    private val linked: (Boolean, String) -> Unit,
     private val frame: (JSONObject) -> Unit,
+    private val foundCb: (List<FoundScale>) -> Unit,
 ) {
     companion object {
         val SERVICE: UUID = UUID.fromString("6e5f0001-b5a3-f393-e0a9-e50e24dcca9e")
@@ -55,6 +56,59 @@ class ScaleBle(
     private var pendingSecure: String? = null
     private var scanning = false
     private var wanted = false
+
+    /** Address of the scale the user chose. Without one, nothing is connected automatically. */
+    private var target: String? = null
+    private var discovering = false
+    private val seen = LinkedHashMap<String, FoundScale>()
+
+    fun setTarget(address: String?) { target = address }
+
+    private val discoveryCb = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            if (!discovering) return
+            val name = result.scanRecord?.deviceName ?: result.device.name ?: return
+            seen[result.device.address] = FoundScale(result.device.address, name, result.rssi)
+            foundCb(seen.values.sortedByDescending { it.rssi })
+        }
+    }
+
+    /** Lists nearby scales (does not connect). Call stopDiscovery() when the picker closes. */
+    fun startDiscovery() {
+        if (adapter?.isEnabled != true || discovering) return
+        val scanner = adapter.bluetoothLeScanner ?: return
+        stopScan()   // the connect-scan, if any, resumes afterwards
+        seen.clear()
+        foundCb(emptyList())
+        discovering = true
+        val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()
+        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        runCatching { scanner.startScan(listOf(filter), settings, discoveryCb) }.onFailure { discovering = false }
+    }
+
+    fun stopDiscovery() {
+        if (!discovering) return
+        discovering = false
+        runCatching { adapter?.bluetoothLeScanner?.stopScan(discoveryCb) }
+        if (wanted) start()
+    }
+
+    /** Switches to another scale: drops the current link and connects to `address`. */
+    fun choose(address: String) {
+        stopDiscovery()
+        gatt?.let { it.disconnect(); it.close() }
+        gatt = null; cmdChar = null; secChar = null; ready = false
+        linked(false, "")
+        target = address
+        wanted = true
+        start()
+    }
+
+    /** Forgets the chosen scale and disconnects. */
+    fun forget() {
+        target = null
+        stop()
+    }
 
     private val scanCb = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -79,7 +133,7 @@ class ScaleBle(
                     gatt = null
                     cmdChar = null
                     secChar = null
-                    linked(false)
+                    linked(false, "")
                     retryLater()
                 }
             }
@@ -115,7 +169,7 @@ class ScaleBle(
         override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 ready = true
-                linked(true)
+                linked(true, g.device.name ?: "")
             }
         }
 
@@ -141,8 +195,9 @@ class ScaleBle(
 
     fun start() {
         wanted = true
-        if (adapter?.isEnabled != true || gatt != null || scanning) return
-        val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).build()
+        val addr = target ?: return   // nothing chosen yet: wait for the picker
+        if (adapter?.isEnabled != true || gatt != null || scanning || discovering) return
+        val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE)).setDeviceAddress(addr).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
         val scanner = adapter.bluetoothLeScanner ?: return
         scanning = true
@@ -157,7 +212,7 @@ class ScaleBle(
         gatt = null
         cmdChar = null
         secChar = null
-        linked(false)
+        linked(false, "")
     }
 
     private fun stopScan() {
@@ -244,3 +299,6 @@ class ScaleBle(
         }
     }
 }
+
+/** A scale seen while picking one: its advertised name (filscale-XXXX), address and signal. */
+data class FoundScale(val address: String, val name: String, val rssi: Int)

@@ -67,5 +67,13 @@
     <string name="msg_failed">Échec : %1$s</string>
     <string name="msg_no_link">Pas de connexion à la balance</string>
     <string name="rfid_reader">LECTEUR</string>
+    <string name="scale_label">"Balance : "</string>
+    <string name="scale_none">aucune sélectionnée</string>
+    <string name="btn_add_scale">Ajouter ou changer de balance</string>
+    <string name="picker_title">Choisissez votre balance</string>
+    <string name="picker_hint">Balances à proximité en Bluetooth. Approchez le téléphone de la vôtre : le signal le plus fort est le plus proche.</string>
+    <string name="picker_none_found">Aucune balance trouvée. Vérifiez qu\'elle est allumée et proche.</string>
+    <string name="picker_nearest">la plus proche</string>
+    <string name="btn_forget_scale">Oublier cette balance</string>
     <string name="language_system">Langue du système</string>
 </resources>

@@ -29,6 +29,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val vm: ScaleViewModel by viewModels()
@@ -83,6 +86,10 @@ class MainActivity : ComponentActivity() {
                         onFbLogout = vm::logoutFirebase,
                         onRfidTest = vm::rfidTest,
                         onRfPower = vm::rfPower,
+                        onDiscover = vm::discoverScales,
+                        onStopDiscover = vm::stopDiscoverScales,
+                        onChoose = vm::chooseScale,
+                        onForget = vm::forgetScale,
                     )
                 }
             }
@@ -103,8 +110,15 @@ fun ScaleScreen(
     onFbLogout: () -> Unit,
     onRfidTest: (Boolean) -> Unit,
     onRfPower: (Int) -> Unit,
+    onDiscover: () -> Unit,
+    onStopDiscover: () -> Unit,
+    onChoose: (FoundScale) -> Unit,
+    onForget: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
+    var showPicker by remember { mutableStateOf(false) }
+    // First run (no scale chosen yet): go straight to the picker.
+    LaunchedEffect(s.noScale) { if (s.noScale) showPicker = true }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -117,8 +131,12 @@ fun ScaleScreen(
     }
 
     if (showSettings) {
-        SettingsDialog(s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout, onRfidTest, onRfPower)
+        SettingsDialog(
+            s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
+            onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
+        )
     }
+    if (showPicker) ScalePickerDialog(s, onDiscover, onStopDiscover, onChoose) { showPicker = false }
 }
 
 @Composable
@@ -134,6 +152,8 @@ private fun SettingsDialog(
     onFbLogout: () -> Unit,
     onRfidTest: (Boolean) -> Unit,
     onRfPower: (Int) -> Unit,
+    onPickScale: () -> Unit,
+    onForget: () -> Unit,
 ) {
     var showCal by remember { mutableStateOf(false) }
     var showHost by remember { mutableStateOf(false) }
@@ -148,8 +168,12 @@ private fun SettingsDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.scale_label), fontWeight = FontWeight.Medium)
+                    Text(if (s.noScale) stringResource(R.string.scale_none) else s.scaleName)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.label_bluetooth), fontWeight = FontWeight.Medium)
-                    Text(stringResource(if (s.bleLinked) R.string.status_connected else R.string.status_searching_scale))
+                    Text(stringResource(if (s.bleLinked) R.string.status_connected else if (s.noScale) R.string.scale_none else R.string.status_searching_scale))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.label_wifi), fontWeight = FontWeight.Medium)
@@ -188,6 +212,12 @@ private fun SettingsDialog(
                         fontSize = 12.sp, color = Color(0xFF8A93A6),
                     )
                 }
+                OutlinedButton(onClick = onPickScale, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.btn_add_scale))
+                }
+                if (!s.noScale) {
+                    TextButton(onClick = onForget) { Text(stringResource(R.string.btn_forget_scale)) }
+                }
                 OutlinedButton(
                     onClick = { onScanWifi(); showWifi = true },
                     enabled = s.bleLinked,
@@ -222,6 +252,55 @@ private fun SettingsDialog(
     if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
     if (showCal) CalibrateDialog({ showCal = false }) { onCalibrate(it); showCal = false }
+}
+
+/** Lists scales in Bluetooth range (strongest first); tapping one makes it the scale this app uses. */
+@Composable
+private fun ScalePickerDialog(
+    s: ScaleState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onChoose: (FoundScale) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // Discovery starts once the Bluetooth permission is there (it may be asked right now).
+    LaunchedEffect(s.blePerm) { if (s.blePerm) onStart() }
+    DisposableEffect(Unit) { onDispose { onStop() } }
+    var waited by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(10_000); waited = true }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.picker_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.picker_hint), fontSize = 13.sp)
+                if (s.found.isEmpty()) {
+                    Text(
+                        stringResource(if (waited) R.string.picker_none_found else R.string.scanning),
+                        fontSize = 13.sp, color = Color(0xFF8A93A6),
+                    )
+                }
+                s.found.forEachIndexed { i, f ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(if (f.name == s.scaleName && !s.noScale) Color(0xFF2F7FFF) else Color(0xFF141821))
+                            .clickable { onChoose(f); onDismiss() }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(f.name, fontWeight = FontWeight.Medium)
+                        Text(
+                            "${f.rssi} dBm" + if (i == 0 && s.found.size > 1) " · " + stringResource(R.string.picker_nearest) else "",
+                            fontSize = 12.sp, color = Color(0xFF8A93A6),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
+    )
 }
 
 /** Wi-Fi provisioning over BLE: pick a network the scale can see, type the password. */

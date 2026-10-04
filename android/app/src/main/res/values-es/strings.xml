@@ -67,5 +67,13 @@
     <string name="msg_failed">Falló: %1$s</string>
     <string name="msg_no_link">Sin conexión con la báscula</string>
     <string name="rfid_reader">LECTOR</string>
+    <string name="scale_label">"Báscula: "</string>
+    <string name="scale_none">ninguna seleccionada</string>
+    <string name="btn_add_scale">Añadir o cambiar de báscula</string>
+    <string name="picker_title">Elige tu báscula</string>
+    <string name="picker_hint">Básculas cercanas por Bluetooth. Acerca el teléfono a la tuya: la señal más fuerte es la más cercana.</string>
+    <string name="picker_none_found">No se encontró ninguna báscula. Comprueba que está encendida y cerca.</string>
+    <string name="picker_nearest">la más cercana</string>
+    <string name="btn_forget_scale">Olvidar esta báscula</string>
     <string name="language_system">Idioma del sistema</string>
 </resources>

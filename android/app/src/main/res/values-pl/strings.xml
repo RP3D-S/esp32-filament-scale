@@ -67,5 +67,13 @@
     <string name="msg_failed">Niepowodzenie: %1$s</string>
     <string name="msg_no_link">Brak połączenia z wagą</string>
     <string name="rfid_reader">CZYTNIK</string>
+    <string name="scale_label">"Waga: "</string>
+    <string name="scale_none">nie wybrano</string>
+    <string name="btn_add_scale">Dodaj lub zmień wagę</string>
+    <string name="picker_title">Wybierz swoją wagę</string>
+    <string name="picker_hint">Pobliskie wagi przez Bluetooth. Zbliż telefon do swojej: najsilniejszy sygnał to najbliższa waga.</string>
+    <string name="picker_none_found">Nie znaleziono wagi. Sprawdź, czy jest włączona i blisko.</string>
+    <string name="picker_nearest">najbliższa</string>
+    <string name="btn_forget_scale">Zapomnij tę wagę</string>
     <string name="language_system">Domyślny systemowy</string>
 </resources>

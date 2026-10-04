@@ -21,7 +21,14 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("filscale", 0)
 
-    private val _state = MutableStateFlow(ScaleState(host = prefs.getString("host", "") ?: ""))
+    private val savedAddr = prefs.getString("ble_addr", null)
+    private val _state = MutableStateFlow(
+        ScaleState(
+            host = prefs.getString("host", "") ?: "",
+            scaleName = prefs.getString("ble_name", "") ?: "",
+            noScale = savedAddr == null,
+        ),
+    )
     val state: StateFlow<ScaleState> = _state.asStateFlow()
 
     private val client = ScaleClient(
@@ -35,8 +42,11 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ble = ScaleBle(
         app,
-        linked = { up -> _state.update { it.copy(bleLinked = up) } },
+        linked = { up, name ->
+            _state.update { it.copy(bleLinked = up, scaleName = if (up && name.isNotBlank()) name else it.scaleName) }
+        },
         frame = { onFrame(it) },
+        foundCb = { list -> _state.update { it.copy(found = list) } },
     )
 
     private val discovery = ScaleDiscovery(app) { found ->
@@ -48,6 +58,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     private var wantWifi = false
 
     init {
+        ble.setTarget(savedAddr)
         if (_state.value.host.isNotBlank()) connectWifi() else search()
     }
 
@@ -59,7 +70,34 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Call once the Bluetooth permissions are granted. */
-    fun startBle() = ble.start()
+    fun startBle() {
+        _state.update { it.copy(blePerm = true) }
+        ble.start()
+    }
+
+    fun discoverScales() = ble.startDiscovery()
+    fun stopDiscoverScales() = ble.stopDiscovery()
+
+    /** Remembers `scale` as the one to use and connects to it; the previous scale's data is dropped. */
+    fun chooseScale(scale: FoundScale) {
+        prefs.edit().putString("ble_addr", scale.address).putString("ble_name", scale.name).remove("host").apply()
+        wantWifi = false
+        reconnectJob?.cancel()
+        client.disconnect()
+        _state.update {
+            ScaleState(scaleName = scale.name, noScale = false, blePerm = it.blePerm)
+        }
+        ble.choose(scale.address)
+    }
+
+    fun forgetScale() {
+        prefs.edit().remove("ble_addr").remove("ble_name").remove("host").apply()
+        wantWifi = false
+        reconnectJob?.cancel()
+        client.disconnect()
+        ble.forget()
+        _state.update { ScaleState(noScale = true, blePerm = it.blePerm) }
+    }
 
     /** Accepts "192.168.1.50", "http://filscale-1A2B.local/" etc. */
     fun setHost(raw: String) {

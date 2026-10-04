@@ -33,6 +33,11 @@ data class ScaleState(
     val rfUid: String = "",
     val rfVer: String = "",
     val searching: Boolean = false,
+    /** BLE: the chosen scale (name), none chosen yet, nearby scales while picking, permission granted */
+    val scaleName: String = "",
+    val noScale: Boolean = true,
+    val found: List<FoundScale> = emptyList(),
+    val blePerm: Boolean = false,
     val message: String? = null,
 ) {
     val connected: Boolean get() = wifiLinked || bleLinked
