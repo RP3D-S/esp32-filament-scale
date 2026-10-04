@@ -37,5 +37,13 @@ String fbErrorText();
 /** URL of the signed-in account's avatar, empty when signed out or the account has none. */
 String fbAvatarUrl();
 
+/** What the signed-in account's inventory says about the spool on the platform (read-only). */
+struct FbSpool {
+    int    container = -1;   // empty-spool weight in grams, -1 when unknown (tag not in the inventory)
+    String rackName;         // empty when the spool is not placed in a rack
+    String rackPos;          // e.g. "A3": level letter + position
+};
+FbSpool fbSpool();
+
 /** Account colour as RRGGBB (from the user's profile), empty when signed out. */
 String fbAvatarColor();

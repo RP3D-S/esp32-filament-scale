@@ -25,6 +25,7 @@ static String gEmail, gName, gError;
 
 static String gUid, gIdToken, gRefresh;
 static String gColor;                     // account colour as RRGGBB (the original draws initials on it)
+static FbSpool gSpool;
 static bool gProfileDocDone = false;
 static bool gProfilePhotoDone = false;
 static String gAvatar;                    // avatar URL of the signed-in account
@@ -57,6 +58,7 @@ static void clearSession() {
     gUid = gIdToken = gRefresh = gEmail = gName = gAvatar = gColor = "";
     gProfileDocDone = false;
     gProfilePhotoDone = false;
+    gSpool = FbSpool();
 }
 
 // TLS with the certificate bundle built into the Arduino core, so the server is verified.
@@ -290,6 +292,95 @@ static bool fetchProfile() {
     return true;
 }
 
+// ---- inventory lookup (read-only) -------------------------------------------
+// users/{uid}/inventory/{UID hex}: container_weight, measure_gr, rack{id,level,position,name}.
+// Streamed line by line like the profile, so the document size does not matter.
+class SpoolScanner : public Stream {
+public:
+    String line, lastKey, rackId, rackName, posLabel;
+    long container = -1, level = -1, position = -1;
+    size_t write(uint8_t c) override {
+        if (c == '\n') { process(); line = ""; }
+        else if (c != '\r' && line.length() < 500) line += (char)c;
+        return 1;
+    }
+    size_t write(const uint8_t *b, size_t n) override { for (size_t i = 0; i < n; i++) write(b[i]); return n; }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    void flush() override {}
+
+private:
+    static bool isNameKey(const String &k) {
+        return k == "name" || k == "label" || k == "display_name" || k == "title" || k == "rack_name";
+    }
+    void process() {
+        String t = line; t.trim();
+        if (t.endsWith("{") && t.startsWith("\"")) {
+            int e = t.indexOf('"', 1);
+            if (e > 1) lastKey = t.substring(1, e);
+            return;
+        }
+        int c = t.indexOf(':');
+        if (c < 0) return;
+        String v = t.substring(c + 1); v.trim();
+        if (v.endsWith(",")) v.remove(v.length() - 1);
+        if (v.length() >= 2 && v[0] == '"') v = v.substring(1, v.length() - 1);
+        if (t.startsWith("\"integerValue\"") || t.startsWith("\"doubleValue\"")) {
+            long n = lroundf(v.toFloat());
+            if (lastKey == "container_weight") container = n;
+            else if (lastKey == "level") level = n;
+            else if (lastKey == "position") position = n;
+        } else if (t.startsWith("\"stringValue\"")) {
+            if (lastKey == "id") rackId = v;
+            else if (isNameKey(lastKey) && rackName.isEmpty()) rackName = v;
+            else if (lastKey == "position_label" || lastKey == "positionLabel") posLabel = v;
+        }
+    }
+};
+
+static bool streamGet(const String &url, Stream &sink, int &code) {
+    WiFiClientSecure client;
+    client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
+    HTTPClient http;
+    http.setTimeout(10000);
+    if (!http.begin(client, url)) return false;
+    http.addHeader("Authorization", "Bearer " + gIdToken);
+    code = http.GET();
+    if (code == 200) http.writeToStream(&sink);
+    http.end();
+    return true;   // the client is destroyed on return: one TLS session alive at a time
+}
+
+static void fetchSpool(const String &uidHex) {
+    String base = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid;
+    SpoolScanner sc;
+    int code = -1;
+    if (!streamGet(base + "/inventory/" + uidHex +
+                   "?mask.fieldPaths=container_weight&mask.fieldPaths=rack", sc, code) || code != 200) {
+        Serial.printf("[FB] inventory %s -> HTTP %d (not in the inventory or unreachable)\n", uidHex.c_str(), code);
+        FbSpool none;
+        xSemaphoreTake(gLock, portMAX_DELAY); gSpool = none; xSemaphoreGive(gLock);
+        return;
+    }
+    String rackName = sc.rackName;
+    if (rackName.isEmpty() && sc.rackId.length()) {   // the name lives on the rack document
+        SpoolScanner rs;
+        int rc = -1;
+        if (streamGet(base + "/racks/" + sc.rackId, rs, rc) && rc == 200) rackName = rs.rackName;
+    }
+    String pos = sc.posLabel;
+    if (pos.isEmpty() && sc.level >= 0 && sc.position >= 0) {
+        pos = String((char)('A' + (sc.level % 26))) + String(sc.position + 1);   // level 0 = A, position 0 = 1
+    }
+    FbSpool s;
+    s.container = (int)sc.container;
+    s.rackName = rackName;
+    s.rackPos = pos;
+    Serial.printf("[FB] inventory %s: container=%d g rack='%s' pos='%s'\n", uidHex.c_str(), s.container, rackName.c_str(), pos.c_str());
+    xSemaphoreTake(gLock, portMAX_DELAY); gSpool = s; xSemaphoreGive(gLock);
+}
+
 static void jsonString(JsonObject f, const char *k, const String &v) {
     if (v.length()) f[k]["stringValue"] = v; else f[k]["nullValue"] = "NULL_VALUE";
 }
@@ -361,6 +452,7 @@ static void fbTask(void *) {
     uint32_t lastBeat = 0;
     bool needFull = true;
     String lastUid;
+    String spoolUid;   // tag the inventory info belongs to
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(400));
@@ -407,6 +499,15 @@ static void fbTask(void *) {
         xSemaphoreTake(gLock, portMAX_DELAY);
         curUid = gSnap.uid;
         xSemaphoreGive(gLock);
+        if (curUid != spoolUid) {
+            spoolUid = curUid;
+            if (curUid.isEmpty()) {
+                FbSpool none;
+                xSemaphoreTake(gLock, portMAX_DELAY); gSpool = none; xSemaphoreGive(gLock);
+            } else {
+                fetchSpool(curUid);
+            }
+        }
         bool changed = curUid != lastUid;
         if (lastBeat == 0 || changed || millis() - lastBeat >= HEARTBEAT_MS) {
             if (sendHeartbeat(needFull)) {
@@ -459,5 +560,10 @@ int fbState() { return gState; }
 String fbEmail() { return gEmail; }
 String fbDisplayName() { return gName; }
 String fbErrorText() { return gError; }
+FbSpool fbSpool() {
+    FbSpool s;
+    xSemaphoreTake(gLock, portMAX_DELAY); s = gSpool; xSemaphoreGive(gLock);
+    return s;
+}
 String fbAvatarColor() { return gState == FB_SIGNED_IN ? gColor : String(""); }
 String fbAvatarUrl() { return gState == FB_SIGNED_IN ? gAvatar : String(""); }

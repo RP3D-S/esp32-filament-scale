@@ -204,16 +204,23 @@ fun ScaleDisplay(
             // Container / filament are not read by this firmware yet (they come from the
             // TigerTag cloud in the original), so they show the original's "--" placeholder.
             Text(stringResource(R.string.container), color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(246f), d(14f)))
-            Text("-- g", color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(376f), d(14f)))
+            Text(
+                if (s.container > 0) "${s.container} g" else "-- g",
+                color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(376f), d(14f)),
+            )
             Text(stringResource(R.string.filament), color = MUTED, fontSize = f(14f), modifier = Modifier.offset(d(246f), d(40f)))
-            Text("-- g", color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(376f), d(40f)))
+            Text(
+                // net = gross - empty spool, shown only when the inventory knows the spool (as on the original)
+                if (s.connected && s.container > 0 && s.weight > s.container) "${s.weight - s.container} g" else "-- g",
+                color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(376f), d(40f)),
+            )
 
             Box(Modifier.offset(d(246f), d(68f)).size(d(184f), d(1f)).background(BORDER))
 
             HomeIcon(Modifier.offset(d(246f), d(80f)).size(d(16f)))
-            Text("--", color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(270f), d(80f)))
+            Text(s.rackName.ifBlank { "--" }, color = TEXT, fontSize = f(14f), maxLines = 1, modifier = Modifier.offset(d(270f), d(80f)).width(d(150f)))
             PinIcon(Modifier.offset(d(246f), d(108f)).size(d(16f)))
-            Text("--", color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(270f), d(108f)))
+            Text(s.rackPos.ifBlank { "--" }, color = TEXT, fontSize = f(14f), modifier = Modifier.offset(d(270f), d(108f)))
         }
 
         // ---- Bottom: Tare (2/3) + Settings (1/3) ----

@@ -29,6 +29,10 @@ data class ScaleState(
     val fbNeedsBoot: Boolean = false,
     /** Account avatar: photo URL (may be empty) and the account colour as RRGGBB for the initials circle */
     val avatarUrl: String = "",
+    /** Spool on the platform, read from the account's inventory: empty-spool weight (-1 unknown), rack name and slot */
+    val container: Int = -1,
+    val rackName: String = "",
+    val rackPos: String = "",
     val avatarColor: String = "",
     /** RFID test screen: RF power level 0..4, test mode on, last UID read, PN532 version */
     val rfPow: Int = 3,
@@ -67,6 +71,9 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     fbEmail = if (j.has("fbe")) j.optString("fbe") else fbEmail,
     fbName = if (j.has("fbn")) j.optString("fbn") else fbName,
     fbError = if (j.has("fber")) j.optString("fber") else fbError,
+    container = if (j.has("cw")) j.optInt("cw", -1) else container,
+    rackName = if (j.has("rk")) j.optString("rk") else rackName,
+    rackPos = if (j.has("rp")) j.optString("rp") else rackPos,
     avatarUrl = if (j.has("fb_avatar")) j.optString("fb_avatar") else avatarUrl,
     avatarColor = if (j.has("fbc")) j.optString("fbc") else avatarColor,
     fbNeedsBoot = if (j.has("fb_err")) true else if (j.has("fbs")) false else fbNeedsBoot,

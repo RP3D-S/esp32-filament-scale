@@ -464,7 +464,20 @@ static void pumpBle(bool periodicFull) {
     static String lFbc;
     String fbc = fbAvatarColor();
     putField<String>(fb, "fbc", fbc, lFbc, full);
+
+
     if (fb.size()) { String out; serializeJson(fb, out); bleEnqueue(out); }
+
+    {
+        StaticJsonDocument<192> sf;
+        static int lCw = -2;
+        static String lRk, lRp;
+        FbSpool sp = fbSpool();
+        putField<int>(sf, "cw", sp.container, lCw, full);
+        putField<String>(sf, "rk", sp.rackName, lRk, full);
+        putField<String>(sf, "rp", sp.rackPos, lRp, full);
+        if (sf.size()) { String out; serializeJson(sf, out); bleEnqueue(out); }
+    }
 
     static String lAva = "\x01";
     String ava = fbAvatarUrl();
