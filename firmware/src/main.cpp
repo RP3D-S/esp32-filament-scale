@@ -242,6 +242,18 @@ static void doCalibrate(float grams) {
     saveCalFactor(calFactor);
 }
 
+// Erases everything the owner configured: the scale's NVS namespace (calibration, tare, RF level),
+// the Firebase session and the saved Wi-Fi, then restarts. Shared by Studio's factory_reset command
+// and the app's Settings row.
+static volatile bool pendFactoryReset = false;
+
+static void doFactoryReset() {
+    prefs.begin("scale", false); prefs.clear(); prefs.end();
+    fbLogout();
+    WiFi.disconnect(true, true);
+    pendRestartAt = millis() + 1500;
+}
+
 // ---- Calibration wizard ---------------------------------------------------
 // Port of the original's 3-step wizard (runCalibrationWizard): 1 empty + TARE (and the zero must
 // hold), 2 pick the reference weight, 3 place it and CALIBRATE once the reading is steady.
@@ -666,6 +678,12 @@ public:
             if (*email && *pass) fbLogin(email, pass);
         } else if (!strcmp(cmd, "fb_logout")) {
             fbLogout();
+        } else if (!strcmp(cmd, "restart")) {
+            pendRestartAt = millis() + 1500;
+        } else if (!strcmp(cmd, "factory_reset")) {
+            // Wipes Wi-Fi, account and calibration. The encrypted link (paired phone) is the authority;
+            // the app makes the user hold a button for 3 s before it sends this.
+            pendFactoryReset = true;
         }
     }
 };
@@ -898,10 +916,7 @@ static String onRemoteCommand(const String &type, float value, bool &ok) {
     }
     if (type == "restart") { pendRestartAt = millis() + 1500; return "Restarting..."; }
     if (type == "factory_reset") {
-        prefs.begin("scale", false); prefs.clear(); prefs.end();
-        fbLogout();
-        WiFi.disconnect(true, true);
-        pendRestartAt = millis() + 1500;
+        pendFactoryReset = true;     // done in loop(), not on the cloud task
         return "Reset, restarting...";
     }
     ok = false;
@@ -1051,6 +1066,7 @@ void loop() {
         scale.set_scale(calFactor);
         saveCalFactor(calFactor);
     }
+    if (pendFactoryReset)   { pendFactoryReset = false; doFactoryReset(); }
     if (pendRestartAt && (int32_t)(millis() - pendRestartAt) >= 0) ESP.restart();
     if (pendCalGrams > 0 && !calActive()) { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
 
