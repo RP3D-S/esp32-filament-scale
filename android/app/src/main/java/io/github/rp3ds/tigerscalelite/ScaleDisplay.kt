@@ -1,4 +1,4 @@
-package io.github.rp3ds.filscale
+package io.github.rp3ds.tigerscalelite
 
 import android.graphics.Bitmap
 import androidx.annotation.StringRes
@@ -153,7 +153,7 @@ fun ScaleDisplay(
                 Avatar(s, d(28f), f(13f))
                 Spacer(Modifier.width(d(6f)))
             }
-            Text(if (s.fbState == 2 && s.fbName.isNotBlank()) s.fbName else "FilScale", color = TEXT, fontSize = f(20f))
+            Text(if (s.fbState == 2 && s.fbName.isNotBlank()) s.fbName else "Tiger Scale Lite", color = TEXT, fontSize = f(20f))
         }
 
         // ---- Top-right: link icons ----

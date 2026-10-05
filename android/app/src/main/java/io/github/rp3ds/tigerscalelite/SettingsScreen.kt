@@ -1,4 +1,4 @@
-package io.github.rp3ds.filscale
+package io.github.rp3ds.tigerscalelite
 
 import android.app.LocaleManager
 import android.os.Build

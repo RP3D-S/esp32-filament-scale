@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "FilScale"
+rootProject.name = "TigerScaleLite"
 include(":app")

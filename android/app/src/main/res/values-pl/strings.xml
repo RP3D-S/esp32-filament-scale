@@ -27,7 +27,7 @@
     <string name="badge_weigh_error">Błąd ważenia</string>
     <string name="email">Email</string>
     <string name="password">Hasło</string>
-    <string name="app_name">Waga</string>
+    <string name="app_name">Tiger Scale Lite</string>
     <string name="no_connection">Brak połączenia</string>
     <string name="status_connected">połączono</string>
     <string name="status_searching_scale">szukam wagi…</string>
@@ -93,7 +93,7 @@
     <string name="cal_empty_tare">Opróżnij szalkę i wytaruj</string>
     <string name="cal_ref_title">Waga odniesienia (g)</string>
     <string name="cal_min_g">min. %1$d g</string>
-    <string name="cal_prompt_q">Skalibruj swoją TigerScale</string>
+    <string name="cal_prompt_q">Skalibruj swoją Tiger Scale Lite</string>
     <string name="cal_prompt_sub">Ważenia nie są wiarygodne przed pierwszą kalibracją</string>
     <string name="cal_wizard">Kreator kalibracji</string>
     <string name="cal_max_g">max. %1$d g</string>

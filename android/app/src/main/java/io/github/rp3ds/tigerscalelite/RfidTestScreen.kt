@@ -1,4 +1,4 @@
-package io.github.rp3ds.filscale
+package io.github.rp3ds.tigerscalelite
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

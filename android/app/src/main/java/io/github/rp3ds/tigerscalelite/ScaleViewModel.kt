@@ -1,4 +1,4 @@
-package io.github.rp3ds.filscale
+package io.github.rp3ds.tigerscalelite
 
 import android.app.Application
 import android.os.SystemClock
@@ -21,7 +21,7 @@ import org.json.JSONObject
 class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     private fun str(id: Int, vararg a: Any): String = getApplication<Application>().getString(id, *a)
 
-    private val prefs = app.getSharedPreferences("filscale", 0)
+    private val prefs = app.getSharedPreferences("tigerscalelite", 0)
 
     private val savedAddr = prefs.getString("ble_addr", null)
     private val _state = MutableStateFlow(
@@ -34,15 +34,15 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<ScaleState> = _state.asStateFlow()
 
     private val client = ScaleClient(
-        opened = { Log.d("FilScale", "wifi link up"); lastWifiFrameMs = SystemClock.elapsedRealtime(); _state.update { it.copy(wifiLinked = true, message = null) } },
+        opened = { Log.d("TigerScaleLite", "wifi link up"); lastWifiFrameMs = SystemClock.elapsedRealtime(); _state.update { it.copy(wifiLinked = true, message = null) } },
         frame = {
             val now = SystemClock.elapsedRealtime()
-            if (lastWifiFrameMs != 0L && now - lastWifiFrameMs > 1_500) Log.d("FilScale", "wifi frame gap ${now - lastWifiFrameMs} ms")
+            if (lastWifiFrameMs != 0L && now - lastWifiFrameMs > 1_500) Log.d("TigerScaleLite", "wifi frame gap ${now - lastWifiFrameMs} ms")
             lastWifiFrameMs = now
             onFrame(it)
         },
         closed = { err ->
-            Log.d("FilScale", "wifi link down: $err")
+            Log.d("TigerScaleLite", "wifi link down: $err")
             _state.update { it.copy(wifiLinked = false, message = if (it.bleLinked) null else err) }
             scheduleReconnect()
         },
@@ -51,13 +51,13 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     private val ble = ScaleBle(
         app,
         linked = { up, name ->
-            Log.d("FilScale", "ble link ${if (up) "up" else "down"}")
+            Log.d("TigerScaleLite", "ble link ${if (up) "up" else "down"}")
             if (up) lastBleFrameMs = SystemClock.elapsedRealtime()
             _state.update { it.copy(bleLinked = up, scaleName = if (up && name.isNotBlank()) name else it.scaleName) }
         },
         frame = {
             val now = SystemClock.elapsedRealtime()
-            if (lastBleFrameMs != 0L && now - lastBleFrameMs > 1_500) Log.d("FilScale", "ble frame gap ${now - lastBleFrameMs} ms")
+            if (lastBleFrameMs != 0L && now - lastBleFrameMs > 1_500) Log.d("TigerScaleLite", "ble frame gap ${now - lastBleFrameMs} ms")
             lastBleFrameMs = now
             onFrame(it)
         },
@@ -80,17 +80,17 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         val now = SystemClock.elapsedRealtime()
         val s = _state.value
         if (s.wifiLinked && now - lastWifiFrameMs > maxAgeMs) {
-            Log.d("FilScale", "wifi link stale ${now - lastWifiFrameMs} ms -> reconnect")
+            Log.d("TigerScaleLite", "wifi link stale ${now - lastWifiFrameMs} ms -> reconnect")
             client.disconnect()
             _state.update { it.copy(wifiLinked = false) }
             connectWifi()
         }
-        if (s.bleLinked && now - lastBleFrameMs > maxAgeMs) { Log.d("FilScale", "ble link stale ${now - lastBleFrameMs} ms -> reconnect"); ble.reconnect() }
+        if (s.bleLinked && now - lastBleFrameMs > maxAgeMs) { Log.d("TigerScaleLite", "ble link stale ${now - lastBleFrameMs} ms -> reconnect"); ble.reconnect() }
     }
 
     /** The app came back to the foreground (e.g. after the phone slept): do not wait for timeouts. */
     fun onForeground() {
-        Log.d("FilScale", "foreground: wifi=${_state.value.wifiLinked} ble=${_state.value.bleLinked}")
+        Log.d("TigerScaleLite", "foreground: wifi=${_state.value.wifiLinked} ble=${_state.value.bleLinked}")
         checkLinks(2_500)
         val s = _state.value
         if (!s.wifiLinked && s.host.isNotBlank()) { reconnectJob?.cancel(); connectWifi() }
@@ -102,7 +102,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
      * Wi-Fi link and stop retrying; Bluetooth keeps the scale connected, and [onForeground] brings Wi-Fi back.
      */
     fun onBackground() {
-        Log.d("FilScale", "background: dropping the wifi link, ble stays")
+        Log.d("TigerScaleLite", "background: dropping the wifi link, ble stays")
         wantWifi = false
         reconnectJob?.cancel()
         client.disconnect()
@@ -184,7 +184,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { ScaleState(noScale = true, blePerm = it.blePerm) }
     }
 
-    /** Accepts "192.168.1.50", "http://filscale-1A2B.local/" etc. */
+    /** Accepts "192.168.1.50", "http://tigerscalelite-1A2B.local/" etc. */
     fun setHost(raw: String) {
         val host = raw.trim().removePrefix("http://").removePrefix("ws://").trimEnd('/')
         if (host.isEmpty() || (host == _state.value.host && _state.value.wifiLinked)) return

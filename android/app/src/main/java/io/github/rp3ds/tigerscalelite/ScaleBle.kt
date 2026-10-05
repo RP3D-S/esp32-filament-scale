@@ -1,4 +1,4 @@
-package io.github.rp3ds.filscale
+package io.github.rp3ds.tigerscalelite
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
@@ -310,5 +310,5 @@ class ScaleBle(
     }
 }
 
-/** A scale seen while picking one: its advertised name (filscale-XXXX), address and signal. */
+/** A scale seen while picking one: its advertised name (tigerscalelite-XXXX), address and signal. */
 data class FoundScale(val address: String, val name: String, val rssi: Int)

@@ -1037,7 +1037,7 @@ void setup() {
 
     uint64_t efuse = ESP.getEfuseMac();   // valid before Wi-Fi starts, unlike WiFi.macAddress()
     uint8_t mac[6]; for (int i = 0; i < 6; i++) mac[i] = (efuse >> (8 * i)) & 0xFF;
-    char n[24]; snprintf(n, sizeof n, "filscale-%02X%02X", mac[4], mac[5]);
+    char n[24]; snprintf(n, sizeof n, "tigerscalelite-%02X%02X", mac[4], mac[5]);
     mdnsName = n;
 
     // No captive portal: the phone app configures Wi-Fi over BLE. Saved credentials

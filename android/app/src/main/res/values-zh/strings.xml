@@ -27,7 +27,7 @@
     <string name="badge_weigh_error">称重错误</string>
     <string name="email">邮箱</string>
     <string name="password">密码</string>
-    <string name="app_name">秤</string>
+    <string name="app_name">Tiger Scale Lite</string>
     <string name="no_connection">未连接</string>
     <string name="status_connected">已连接</string>
     <string name="status_searching_scale">正在搜索秤…</string>
@@ -93,7 +93,7 @@
     <string name="cal_empty_tare">清空秤盘后去皮</string>
     <string name="cal_ref_title">参考重量 (g)</string>
     <string name="cal_min_g">最少 %1$d g</string>
-    <string name="cal_prompt_q">校准您的TigerScale</string>
+    <string name="cal_prompt_q">校准您的Tiger Scale Lite</string>
     <string name="cal_prompt_sub">首次校准前称重不可靠</string>
     <string name="cal_wizard">校准向导</string>
     <string name="cal_max_g">最多 %1$d g</string>

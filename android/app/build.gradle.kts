@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "io.github.rp3ds.filscale"
+    namespace = "io.github.rp3ds.tigerscalelite"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "io.github.rp3ds.filscale"
+        applicationId = "io.github.rp3ds.tigerscalelite"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

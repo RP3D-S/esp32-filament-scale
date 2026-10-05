@@ -582,7 +582,7 @@ static bool sendHeartbeat(bool full) {
         f["mac"]["stringValue"] = gMac;                        m("mac");
         if (nameIt) {
             String suffix = gMac.substring(8); suffix.toUpperCase();
-            f["display_name"]["stringValue"] = "FilScale-" + suffix;   m("display_name");
+            f["display_name"]["stringValue"] = "TigerScaleLite-" + suffix;   m("display_name");
         }
     }
     JsonObject tr = w.createNestedArray("updateTransforms").createNestedObject();

@@ -29,7 +29,7 @@ One PN532, no servo, no screen, no battery.
 5. App: `cd android && set JAVA_HOME=<jdk17> && gradlew.bat assembleDebug`, install with `adb install -r`.
    Xiaomi/Redmi phones need "Install via USB" enabled in developer options. A debug build from another PC
    is signed with a different key, so `adb install -r` fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE:
-   `adb uninstall io.github.rp3ds.filscale` first (only the app's own settings are lost: chosen scale, IP, language).
+   `adb uninstall io.github.rp3ds.tigerscalelite` first (only the app's own settings are lost: chosen scale, IP, language).
 6. Serial console 115200 on the ESP32's COM port. No Wi-Fi/Firebase secrets are in the repo
    (the Firebase web key in the code is the public client key, same as upstream).
 
@@ -65,7 +65,8 @@ One PN532, no servo, no screen, no battery.
 - Restart and factory reset go over the **encrypted** BLE characteristic (`restart`, `factory_reset`). The app
   asks for a confirmation; the factory reset button only fires after a 3 s press-and-hold. It wipes Wi-Fi, account
   and calibration (NVS namespace `scale`), and then the scale restarts. The firmware no longer asks for BOOT.
-- Wi-Fi dialog: show/hide password, and it closes by itself once the scale is connected to the chosen network.
+- Wi-Fi and TigerTag account dialogs: show/hide password, and each closes by itself once the scale is connected to
+  the chosen network / signed in to the account (a failed attempt keeps it open with the error).
 
 ## Open items (in priority order)
 Calibration is done and checked: the first real factor is **943.37** (250 g reference, raw 235 842 counts) and the
@@ -96,8 +97,9 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    largest free block down to ~19 KB, and then **every cloud heartbeat failed with `[FB] heartbeat HTTP -1`** (TLS
    needs contiguous heap) and the scale refused TCP connections for several seconds. One WebSocket client costs
    only ~4 KB and is harmless. Mitigations in place: the firmware keeps at most 2 WebSocket clients, oldest first
-   (`ws.cleanupClients(2)`), and the app drops its Wi-Fi link when it goes to the background (`onBackground()`,
-   Bluetooth stays) and brings it back in `onForeground()`. If `heartbeat HTTP -1` ever shows up in a normal run,
+   (`ws.cleanupClients(2)`, not yet exercised with 3 simultaneous clients), and the app drops its Wi-Fi link when it
+   goes to the background (`onBackground()`, Bluetooth stays; tested: 0 attempts in 40 s, Wi-Fi back 0.4 s after
+   returning) and brings it back in `onForeground()`. If `heartbeat HTTP -1` ever shows up in a normal run,
    look at the heap first (`[FB] heap free=... largest=...` prints every 30 s).
 3. Heap is tight on the classic ESP32 (largest free block ~19-37 KB, lower with more clients connected). AsyncTCP
    stack was cut to 7 KB and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS
@@ -108,7 +110,7 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
 6. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, OTA, web UI from `data/www`,
    rack/position editing, language sync with the account.
 7. Debug logging to remove when done diagnosing: the firmware's `[LOOP]` timing (keep it cheap, it only prints on slow
-   passes) and the app's `FilScale` log. The app's `ble frame gap` line is noise: it fires above 1.5 s, but the scale
+   passes) and the app's `TigerScaleLite` log. The app's `ble frame gap` line is noise: it fires above 1.5 s, but the scale
    only sends a keep-alive every 2 s when nothing changes, so ~2 s gaps are normal.
 
 ## Handy

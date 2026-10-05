@@ -1,11 +1,11 @@
-package io.github.rp3ds.filscale
+package io.github.rp3ds.tigerscalelite
 
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 
 /**
- * Finds the scale on the LAN by its mDNS service (_http._tcp, name "filscale-XXXX").
+ * Finds the scale on the LAN by its mDNS service (_http._tcp, name "tigerscalelite-XXXX").
  * Android does not reliably resolve ".local" names in normal sockets, so we resolve
  * through NsdManager and hand back "ip:port".
  */
@@ -24,7 +24,7 @@ class ScaleDiscovery(context: Context, private val onFound: (String) -> Unit) {
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (!serviceInfo.serviceName.startsWith("filscale", ignoreCase = true)) return
+                if (!serviceInfo.serviceName.startsWith("tigerscalelite", ignoreCase = true)) return
                 nsd.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {}
                     override fun onServiceResolved(info: NsdServiceInfo) {
