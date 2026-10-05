@@ -214,12 +214,16 @@ static void saveTare() {
     prefs.end();
 }
 
+// Tare without blocking. scale.tare(10) waits for 10 HX711 samples (~0.9 s at 10 SPS) and froze the
+// main loop for that long on every tare, which the auto-tare triggers constantly. Instead the job
+// below is fed one sample per pass by updateScale() and applied when all 10 have arrived.
+static const int TARE_SAMPLES = 10;
+static int     tareN = -1;          // -1 = no tare running
+static int64_t tareSum = 0;
+
 static void doTare() {
-    if (!scale.wait_ready_timeout(1000)) return;
-    scale.tare(10);
-    saveTare();
-    filtered = 0; shownWeight = 0;
-    tagLive = "";
+    tareN = 0; tareSum = 0;
+    filtered = 0; shownWeight = 0;  // weighing restarts from zero, as it did after the blocking tare
 }
 
 // The NVS key "cal" doubles as the "has ever been calibrated" sentinel (same idea as the
@@ -320,6 +324,7 @@ static void calTick() {
 
     if (calPhase == CAL_OFF) {
         if (cmd == CC_START) {
+            tareN = -1;                                 // the wizard owns the load cell: drop any tare in flight
             wfStop();                                   // no weigh session may run underneath
             calSavedFactor = calFactor;
             calSavedOffset = scale.get_offset();
@@ -432,7 +437,19 @@ static void updateScale() {
         return;
     }
     scaleOk = true; lastScaleOkMs = millis();
-    rawWeight = scale.get_units(1);
+    long raw = scale.read();
+    if (tareN >= 0) {                       // a tare is collecting its samples: this pass feeds it
+        tareSum += raw;
+        if (++tareN >= TARE_SAMPLES) {
+            scale.set_offset((long)(tareSum / tareN));
+            tareN = -1;
+            saveTare();
+            filtered = 0; shownWeight = 0;
+            tagLive = "";
+        }
+        return;
+    }
+    rawWeight = (float)(raw - scale.get_offset()) / scale.get_scale();
     float a = fabsf(rawWeight - filtered) > FAST_DELTA_G ? EMA_FAST : EMA_SLOW;
     filtered += a * (rawWeight - filtered);
     // 1 g display resolution with hysteresis so the last digit does not flicker
