@@ -1049,12 +1049,19 @@ void setup() {
 void loop() {
     // Diagnostics: a long gap between two passes means something blocked the main loop, and the
     // phone sees every frame (weight, status) late by that much.
-    static uint32_t lastPass = 0;
+    static uint32_t lastPass = 0, lastEnd = 0;
+    const uint32_t pass0 = millis();
     {
-        uint32_t t = millis();
-        if (lastPass && t - lastPass > 400) Serial.printf("[LOOP] stall %u ms\n", (unsigned)(t - lastPass));
-        lastPass = t;
+        if (lastPass && pass0 - lastPass > 400) Serial.printf("[LOOP] stall %u ms\n", (unsigned)(pass0 - lastPass));
+        // Time spent between loop() returning and being called again: the scheduler, not our code.
+        if (lastEnd && pass0 - lastEnd > 300) Serial.printf("[LOOP] outside loop() %u ms\n", (unsigned)(pass0 - lastEnd));
+        lastPass = pass0;
     }
+    // Per-section timing of this pass, printed when the pass is slow (find what blocks the loop).
+    static const char *const SEC_NAMES[] = { "cmds", "wifi", "fbpub", "scale", "rfid", "status", "ws", "wsclean", "ble", "delay" };
+    uint32_t secMs[10] = {0};
+    uint32_t lapAt = pass0;
+    auto lap = [&](int i) { uint32_t n = millis(); secMs[i] += n - lapAt; lapAt = n; };
     static uint32_t lastWs = 0, lastFull = 0;
 
     calTick();
@@ -1069,6 +1076,7 @@ void loop() {
     if (pendFactoryReset)   { pendFactoryReset = false; doFactoryReset(); }
     if (pendRestartAt && (int32_t)(millis() - pendRestartAt) >= 0) ESP.restart();
     if (pendCalGrams > 0 && !calActive()) { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
+    lap(0);
 
     if (digitalRead(BOOT_BTN) == LOW) bootBtnMs = millis() ? millis() : 1;
     if (pendRfPow >= 0) {
@@ -1093,6 +1101,7 @@ void loop() {
     } else if (WiFi.status() != WL_CONNECTED) {
         mdnsOn = false;
     }
+    lap(1);
 
     static uint32_t lastFbPub = 0;
     if (millis() - lastFbPub >= 1000) {
@@ -1109,15 +1118,14 @@ void loop() {
         fs.lastUid1 = lm.uid1; fs.lastUid2 = lm.uid2; fs.lastStatus = lm.status; fs.lastWeight = lm.weight;
         fbPublish(fs);
     }
+    lap(2);
 
-    uint32_t t0 = millis();
     if (!calActive()) updateScale();    // the wizard reads the HX711 itself
-    uint32_t t1 = millis();
+    lap(3);
     pollRfid();
-    uint32_t t2 = millis();
+    lap(4);
     if (!calActive()) updateStatus();   // and no weigh session runs underneath it
-    uint32_t t3 = millis();
-    if (t3 - t0 > 300) Serial.printf("[LOOP] scale=%u rfid=%u status=%u ms\n", (unsigned)(t1 - t0), (unsigned)(t2 - t1), (unsigned)(t3 - t2));
+    lap(5);
 
     if (millis() - lastWs >= WS_INTERVAL_MS) {
         lastWs = millis();
@@ -1141,8 +1149,19 @@ void loop() {
             wsRf = RfState();
             wsCal = CalState();
         }
+        lap(6);
         ws.cleanupClients();
+        lap(7);
         pumpBle(full);
+        lap(8);
     }
     delay(1);
+    lap(9);
+    lastEnd = millis();
+    if (lastEnd - pass0 > 250) {
+        char b[160]; int n = snprintf(b, sizeof b, "[LOOP] slow pass %u ms:", (unsigned)(lastEnd - pass0));
+        for (int i = 0; i < 10 && n < (int)sizeof b - 20; i++)
+            if (secMs[i] > 20) n += snprintf(b + n, sizeof b - n, " %s=%u", SEC_NAMES[i], (unsigned)secMs[i]);
+        Serial.println(b);
+    }
 }
