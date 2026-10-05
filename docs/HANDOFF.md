@@ -68,27 +68,23 @@ One PN532, no servo, no screen, no battery.
 - Wi-Fi dialog: show/hide password, and it closes by itself once the scale is connected to the chosen network.
 
 ## Open items (in priority order)
-1. **Verify the calibration with a second weight.** First real factor is **943.37** (250 g, raw 235 842 counts); the
-   display then read 250 g. It is higher than the 400-460 typical of this load cell/HX711 pair, so put a different
-   known weight on the platform and confirm it reads right before trusting it. The app's wizard screens were checked
-   on the phone and look right (the firmware side was also driven over BLE from a PC).
-   The wizard's "within 1 g" limits fall back to 400 counts/g when the stored factor is below 50: this scale held
-   0.072 before the first calibration, which made the zero check impossible to pass.
-2. **Inventory values overwritten during testing.** The spool pair `1D6EAB64121080` / `1D77F85F121080` now has
-   `weight_available = 562`. Its value before testing was almost certainly **192 g** — restore it in Studio, or
-   re-weigh now that the scale is calibrated. Weighings made before the first calibration (factor 0.072, weights
-   like -643 g or 280 g on an empty pan) may also have written wrong values to other spools.
-3. **Latency fix just made, not yet re-measured on the phone.** The PN532 library's `readBytes()` waited the
+Calibration is done and checked: the first real factor is **943.37** (250 g reference, raw 235 842 counts) and the
+owner confirmed a second, different weight reads correctly. The wizard's "within 1 g" limits fall back to 400
+counts/g when the stored factor is below 50, because this scale held 0.072 before its first calibration, which made
+the zero check impossible to pass. The cloud account used here is a test account, so the inventory values written
+during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do not matter.
+
+1. **Latency fix just made, not yet re-measured on the phone.** The PN532 library's `readBytes()` waited the
    serial timeout (1000 ms) on every "no tag" reply, blocking the main loop to 1 pass/s (weight took ~4 s to
    appear and >15 s to return to zero). Fixed with `Serial2.setTimeout(30)`; loop stalls are gone on the bench.
    Re-test the app unplugged from USB. Keep-alive frames (2 s) and stale-link reconnect were added too.
-4. Heap is tight on the classic ESP32 (largest free block ~20-35 KB during TLS). AsyncTCP stack was cut to 7 KB
+2. Heap is tight on the classic ESP32 (largest free block ~20-35 KB during TLS). AsyncTCP stack was cut to 7 KB
    and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS session.
-5. BLE link occasionally drops (supervision timeout, status 8) when Wi-Fi/TLS is busy; the app reconnects in ~3 s.
-6. No OTA (single 3.9 MB app partition). Flash by USB.
-7. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, OTA, web UI from `data/www`,
+3. BLE link occasionally drops (supervision timeout, status 8) when Wi-Fi/TLS is busy; the app reconnects in ~3 s.
+4. No OTA (single 3.9 MB app partition). Flash by USB.
+5. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, OTA, web UI from `data/www`,
    rack/position editing, language sync with the account.
-8. The app prints a `[LOOP] stall` / `FilScale` debug log; harmless, remove when done diagnosing.
+6. The app prints a `[LOOP] stall` / `FilScale` debug log; harmless, remove when done diagnosing.
 
 ## Handy
 - Wireless adb (no cable): `adb tcpip 5555`, `adb connect <phone-ip>:5555`.
