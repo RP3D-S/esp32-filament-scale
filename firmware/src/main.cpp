@@ -1167,7 +1167,11 @@ void loop() {
             wsCal = CalState();
         }
         lap(6);
-        ws.cleanupClients();
+        // At most 2 WebSocket clients, oldest closed first. A phone that went to sleep (Doze) leaves a dead
+        // socket behind; every one costs ~4 KB, and TLS to the cloud needs the contiguous heap they eat
+        // (with 2 clients plus reconnect churn the largest free block fell to ~19 KB and every cloud
+        // heartbeat failed with HTTP -1).
+        ws.cleanupClients(2);
         lap(7);
         pumpBle(full);
         lap(8);
