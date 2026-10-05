@@ -468,6 +468,16 @@ private fun FirebaseDialog(
 ) {
     var email by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    var showPass by remember { mutableStateOf(false) }
+    var attempted by remember { mutableStateOf(false) }
+    // The sign-in form only shows while signed out, so "signed in" after pressing Connect means it worked:
+    // let "connected as ..." show for a moment, then close (a failed attempt keeps the dialog open).
+    LaunchedEffect(attempted, s.fbState) {
+        if (attempted && s.fbState == 2) {
+            delay(1_200)
+            onDismiss()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.acct_title)) },
@@ -489,7 +499,12 @@ private fun FirebaseDialog(
                     OutlinedTextField(
                         value = pass, onValueChange = { pass = it }, singleLine = true,
                         label = { Text(stringResource(R.string.password)) },
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = { showPass = !showPass }) {
+                                Text(stringResource(if (showPass) R.string.pw_hide else R.string.pw_show), fontSize = 12.sp)
+                            }
+                        },
                     )
                     Text(
                         stringResource(R.string.acct_pair_hint),
@@ -512,7 +527,9 @@ private fun FirebaseDialog(
             if (s.fbState == 2) {
                 TextButton(onClick = { onLogout(); onDismiss() }) { Text(stringResource(R.string.logout)) }
             } else {
-                TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) onLogin(email.trim(), pass) }) { Text(stringResource(R.string.btn_connect)) }
+                TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) { attempted = true; onLogin(email.trim(), pass) } }) {
+                    Text(stringResource(R.string.btn_connect))
+                }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
