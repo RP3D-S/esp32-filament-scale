@@ -81,4 +81,24 @@
     <string name="picker_nearest">最近</string>
     <string name="btn_forget_scale">忘记此秤</string>
     <string name="language_system">跟随系统</string>
+    <!-- Calibration wizard (texts of the original scale's wizard, i18n.h) -->
+    <string name="cal_place">请放上 %1$.0f 克。</string>
+    <string name="cal_saved">校准成功</string>
+    <string name="cal_saved2">已保存到存储器。</string>
+    <string name="cal_err_read">请确认物品已放在秤上。</string>
+    <string name="cal_taring">归零中... 请清空秤面。</string>
+    <string name="cal_measuring">测量中... 请稍候。</string>
+    <string name="cal_custom">自定义</string>
+    <string name="later">稍后</string>
+    <string name="cal_empty_tare">清空秤盘后去皮</string>
+    <string name="cal_ref_title">参考重量 (g)</string>
+    <string name="cal_min_g">最少 %1$d g</string>
+    <string name="cal_prompt_q">校准您的TigerScale</string>
+    <string name="cal_prompt_sub">首次校准前称重不可靠</string>
+    <string name="cal_wizard">校准向导</string>
+    <string name="cal_max_g">最多 %1$d g</string>
+    <string name="cal_manual">手动校准</string>
+    <string name="cal_factor_current">当前系数：%1$s</string>
+    <string name="cal_factor_new">新系数</string>
+    <string name="apply">应用</string>
 </resources>

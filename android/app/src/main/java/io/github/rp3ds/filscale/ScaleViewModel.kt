@@ -208,8 +208,20 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
 
     fun tare() = command("/api/tare", "{}", """{"cmd":"tare"}""")
 
-    fun calibrate(knownGrams: Float) =
-        command("/api/calibrate", """{"knownGrams":$knownGrams}""", """{"cmd":"calibrate","grams":$knownGrams}""")
+    // Calibration wizard: the scale runs the state machine, the app only sends the user's choices.
+    private fun cal(cmd: String, extra: String = "") =
+        command("/api/cal", """{"cmd":"$cmd"$extra}""", """{"cmd":"$cmd"$extra}""")
+
+    fun calStart() = cal("cal_start")
+    fun calTare() = cal("cal_tare")
+    fun calRef(grams: Float) = cal("cal_ref", ""","grams":$grams""")
+    fun calMeasure() = cal("cal_measure")
+    fun calBack() = cal("cal_back")
+    fun calCancel() = cal("cal_cancel")
+
+    /** Manual entry of the factor, as on the original's web page. */
+    fun calFactor(factor: Float) =
+        command("/api/calibration", """{"value":$factor}""", """{"cmd":"cal_factor","value":$factor}""")
 
     /** Asks the scale (over BLE) which Wi-Fi networks it can see. */
     fun scanWifi() {

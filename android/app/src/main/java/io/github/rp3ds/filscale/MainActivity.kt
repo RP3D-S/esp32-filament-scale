@@ -10,17 +10,24 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,12 +49,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val vm: ScaleViewModel by viewModels()
@@ -79,10 +90,13 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = Color(0xFF0B0E14)) {
                     val s by vm.state.collectAsStateWithLifecycle()
+                    val cal = remember {
+                        CalActions(vm::calStart, vm::calTare, vm::calRef, vm::calMeasure, vm::calBack, vm::calCancel, vm::calFactor)
+                    }
                     ScaleScreen(
                         s = s,
                         onTare = vm::tare,
-                        onCalibrate = vm::calibrate,
+                        cal = cal,
                         onHost = vm::setHost,
                         onSearch = vm::search,
                         onScanWifi = vm::scanWifi,
@@ -106,7 +120,7 @@ class MainActivity : ComponentActivity() {
 fun ScaleScreen(
     s: ScaleState,
     onTare: () -> Unit,
-    onCalibrate: (Float) -> Unit,
+    cal: CalActions,
     onHost: (String) -> Unit,
     onSearch: () -> Unit,
     onScanWifi: () -> Unit,
@@ -122,33 +136,96 @@ fun ScaleScreen(
 ) {
     var showSettings by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
+    var showWizard by remember { mutableStateOf(false) }
+    var showCalPrompt by remember { mutableStateOf(false) }
     // First run (no scale chosen yet): go straight to the picker.
     LaunchedEffect(s.noScale) { if (s.noScale) showPicker = true }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        ScaleDisplay(s, onTare = onTare, onSettings = { showSettings = true })
-        s.message?.let {
-            Text(it, color = Color(0xFFF2B705), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp))
+    // First-calibration reminder, as on the original: a never-calibrated scale weighs garbage, so ask
+    // 2 s after the scale answers, then every 5 minutes until a calibration lands. Never while a
+    // weighing is in progress or the wizard is open.
+    val sNow by rememberUpdatedState(s)
+    LaunchedEffect(s.connected, s.calDone) {
+        if (!s.connected || s.calDone) { showCalPrompt = false; return@LaunchedEffect }
+        delay(2_000)
+        while (true) {
+            val cur = sNow
+            if (cur.calDone || !cur.connected) break
+            if (cur.status == "idle" && cur.calPhase == 0 && !showWizard) showCalPrompt = true
+            delay(300_000)
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ScaleDisplay(s, onTare = onTare, onSettings = { showSettings = true })
+            s.message?.let {
+                Text(it, color = Color(0xFFF2B705), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            }
+        }
+        if (showCalPrompt) {
+            CalPrompt(onGo = { showCalPrompt = false; showWizard = true }, onLater = { showCalPrompt = false })
         }
     }
 
     if (showSettings) {
         SettingsDialog(
-            s, { showSettings = false }, onCalibrate, onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
+            s, { showSettings = false }, cal, onWizard = { showSettings = false; showWizard = true },
+            onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
             onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
         )
     }
+    if (showWizard) CalibrationWizard(s, cal) { showWizard = false }
     if (showPicker) ScalePickerDialog(s, onDiscover, onStopDiscover, onChoose) { showPicker = false }
+}
+
+/**
+ * The original's first-calibration notification: a side panel sliding in from the right over the
+ * dimmed home screen. Tapping outside the panel counts as "later".
+ */
+@Composable
+private fun CalPrompt(onGo: () -> Unit, onLater: () -> Unit) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val swallow = remember { MutableInteractionSource() }
+    Box(
+        Modifier.fillMaxSize().background(Color(0x99000000))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onLater() },
+    ) {
+        AnimatedVisibility(visible = shown, enter = slideInHorizontally { it }, modifier = Modifier.align(Alignment.CenterEnd)) {
+            Column(
+                Modifier
+                    .fillMaxHeight().fillMaxWidth(0.72f).background(Color(0xFF141821))
+                    .clickable(interactionSource = swallow, indication = null) { }
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("◎", color = Color(0xFFE8821E), fontSize = 44.sp)
+                Text(
+                    stringResource(R.string.cal_prompt_q), fontSize = 20.sp, fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp),
+                )
+                Text(
+                    stringResource(R.string.cal_prompt_sub), fontSize = 13.sp, color = Color(0xFF8A93A6),
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
+                )
+                Button(onClick = onGo, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.calibrate)) }
+                TextButton(onClick = onLater) { Text(stringResource(R.string.later)) }
+            }
+        }
+    }
 }
 
 @Composable
 private fun SettingsDialog(
     s: ScaleState,
     onDismiss: () -> Unit,
-    onCalibrate: (Float) -> Unit,
+    cal: CalActions,
+    onWizard: () -> Unit,
     onHost: (String) -> Unit,
     onSearch: () -> Unit,
     onScanWifi: () -> Unit,
@@ -160,7 +237,7 @@ private fun SettingsDialog(
     onPickScale: () -> Unit,
     onForget: () -> Unit,
 ) {
-    var showCal by remember { mutableStateOf(false) }
+    var showManual by remember { mutableStateOf(false) }
     var showHost by remember { mutableStateOf(false) }
     var showWifi by remember { mutableStateOf(false) }
     var showFb by remember { mutableStateOf(false) }
@@ -234,8 +311,14 @@ private fun SettingsDialog(
                 OutlinedButton(onClick = { showRfid = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.rfid_test))
                 }
-                OutlinedButton(onClick = { showCal = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.calibrate))
+                OutlinedButton(onClick = onWizard, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(stringResource(R.string.cal_wizard))
+                        if (s.calibration > 0) Text("%.2f".format(Locale.US, s.calibration), color = Color(0xFF8A93A6))
+                    }
+                }
+                OutlinedButton(onClick = { showManual = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.cal_manual))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onSearch, enabled = !s.searching) { Text(stringResource(R.string.btn_search)) }
@@ -256,7 +339,7 @@ private fun SettingsDialog(
     if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
     if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
-    if (showCal) CalibrateDialog({ showCal = false }) { onCalibrate(it); showCal = false }
+    if (showManual) ManualFactorDialog(s.calibration, { showManual = false }) { cal.factor(it); showManual = false }
 }
 
 /** Lists scales in Bluetooth range (strongest first); tapping one makes it the scale this app uses. */
@@ -441,28 +524,29 @@ private fun HostDialog(current: String, onDismiss: () -> Unit, onOk: (String) ->
     )
 }
 
+/** Types the load-cell factor directly (the original's "manual calibration"). */
 @Composable
-private fun CalibrateDialog(onDismiss: () -> Unit, onOk: (Float) -> Unit) {
-    var text by remember { mutableStateOf("500") }
+private fun ManualFactorDialog(current: Double, onDismiss: () -> Unit, onOk: (Float) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val factor = text.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.calibrate)) },
+        title = { Text(stringResource(R.string.cal_manual)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    stringResource(R.string.cal_steps),
-                    fontSize = 13.sp,
+                    stringResource(R.string.cal_factor_current, "%.4f".format(Locale.US, current)),
+                    fontSize = 13.sp, color = Color(0xFF8A93A6),
                 )
                 OutlinedTextField(
                     value = text, onValueChange = { text = it }, singleLine = true,
-                    label = { Text(stringResource(R.string.cal_weight)) },
+                    label = { Text(stringResource(R.string.cal_factor_new)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { text.replace(',', '.').toFloatOrNull()?.takeIf { it > 0 }?.let(onOk) }) {
-                Text(stringResource(R.string.calibrate))
-            }
+            TextButton(onClick = { factor?.let(onOk) }, enabled = factor != null) { Text(stringResource(R.string.apply)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )

@@ -81,4 +81,24 @@
     <string name="picker_nearest">closest</string>
     <string name="btn_forget_scale">Forget this scale</string>
     <string name="language_system">System default</string>
+    <!-- Calibration wizard (texts of the original scale's wizard, i18n.h) -->
+    <string name="cal_place">Place %1$.0f g on the scale.</string>
+    <string name="cal_saved">Calibration OK!</string>
+    <string name="cal_saved2">Saved to memory.</string>
+    <string name="cal_err_read">Confirm weight is on scale.</string>
+    <string name="cal_taring">Taring... Empty scale, please wait.</string>
+    <string name="cal_measuring">Measuring... Please wait.</string>
+    <string name="cal_custom">Custom</string>
+    <string name="later">Later</string>
+    <string name="cal_empty_tare">Empty the platform, then tare</string>
+    <string name="cal_ref_title">Reference weight (g)</string>
+    <string name="cal_min_g">min. %1$d g</string>
+    <string name="cal_prompt_q">Calibrate your TigerScale</string>
+    <string name="cal_prompt_sub">Weighings are not reliable until the first calibration</string>
+    <string name="cal_wizard">Calibration Wizard</string>
+    <string name="cal_max_g">max. %1$d g</string>
+    <string name="cal_manual">Manual calibration</string>
+    <string name="cal_factor_current">Current factor: %1$s</string>
+    <string name="cal_factor_new">New factor</string>
+    <string name="apply">Apply</string>
 </resources>

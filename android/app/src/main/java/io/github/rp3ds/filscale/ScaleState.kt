@@ -43,6 +43,17 @@ data class ScaleState(
     val rfTest: Boolean = false,
     val rfUid: String = "",
     val rfVer: String = "",
+    /**
+     * Calibration wizard, driven by the scale: phase 0 off, 1 empty + tare, 2 taring, 3 pick the reference,
+     * 4 place the weight, 5 measuring, 6 saved, 7 error. [calOk] = the reading is steady (Calibrate may be
+     * pressed), [calErr] = "" | zero | read | ref. [calDone] stays true until a frame says otherwise, so the
+     * first-calibration reminder never fires on a scale we have not heard from yet.
+     */
+    val calPhase: Int = 0,
+    val calOk: Boolean = false,
+    val calRef: Int = 0,
+    val calErr: String = "",
+    val calDone: Boolean = true,
     val searching: Boolean = false,
     /** BLE: the chosen scale (name), none chosen yet, nearby scales while picking, permission granted */
     val scaleName: String = "",
@@ -89,4 +100,9 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     rfUid = if (j.has("rf_uid")) j.optString("rf_uid") else rfUid,
     rfVer = if (j.has("rf_ver")) j.optString("rf_ver") else rfVer,
     wifiNeedsBoot = if (j.has("wifi_err")) true else if (j.has("wst")) false else wifiNeedsBoot,
+    calPhase = if (j.has("cal")) j.optInt("cal") else calPhase,
+    calOk = if (j.has("cal_ok")) j.optBoolean("cal_ok") else calOk,
+    calRef = if (j.has("cal_ref")) j.optInt("cal_ref") else calRef,
+    calErr = if (j.has("cal_err")) j.optString("cal_err") else calErr,
+    calDone = if (j.has("cal_done")) j.optInt("cal_done") == 1 else calDone,
 )

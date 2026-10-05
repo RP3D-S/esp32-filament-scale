@@ -81,4 +81,24 @@
     <string name="picker_nearest">la más cercana</string>
     <string name="btn_forget_scale">Olvidar esta báscula</string>
     <string name="language_system">Idioma del sistema</string>
+    <!-- Calibration wizard (texts of the original scale's wizard, i18n.h) -->
+    <string name="cal_place">Coloca %1$.0f g en la balanza.</string>
+    <string name="cal_saved">Calibración OK!</string>
+    <string name="cal_saved2">Guardado en memoria.</string>
+    <string name="cal_err_read">Confirma que el peso está en la balanza.</string>
+    <string name="cal_taring">Tarando... Balanza vacía, espera.</string>
+    <string name="cal_measuring">Midiendo... Espera.</string>
+    <string name="cal_custom">Manual</string>
+    <string name="later">Más tarde</string>
+    <string name="cal_empty_tare">Vacíe la plataforma y haga la tara</string>
+    <string name="cal_ref_title">Peso de referencia (g)</string>
+    <string name="cal_min_g">min. %1$d g</string>
+    <string name="cal_prompt_q">Calibre su TigerScale</string>
+    <string name="cal_prompt_sub">Los pesajes no son fiables antes de la primera calibración</string>
+    <string name="cal_wizard">Asistente de calibración</string>
+    <string name="cal_max_g">max. %1$d g</string>
+    <string name="cal_manual">Calibración manual</string>
+    <string name="cal_factor_current">Factor actual: %1$s</string>
+    <string name="cal_factor_new">Nuevo factor</string>
+    <string name="apply">Aplicar</string>
 </resources>
