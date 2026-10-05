@@ -590,8 +590,21 @@ static void pumpBle(bool periodicFull) {
 
 // Scans for networks and sends the strongest few over BLE (fits one notification).
 static void doWifiScan() {
+    Serial.printf("[WIFI] scan start status=%d\n", (int)WiFi.status());
     int n = WiFi.scanNetworks(false, false);
-    StaticJsonDocument<256> d;
+    bool stopped = false;
+    if (n < 0) {   // WIFI_SCAN_FAILED: the radio refuses to scan while a connect attempt is in flight
+        Serial.printf("[WIFI] scan failed (%d), stopping reconnect and retrying\n", n);
+        WiFi.scanDelete();
+        WiFi.disconnect(false, false);   // keeps the saved credentials
+        stopped = true;
+        delay(500);
+        n = WiFi.scanNetworks(false, false);
+    }
+    Serial.printf("[WIFI] scan n=%d\n", n);
+    // ArduinoJson copies each String into the pool (~16 B slot + text), so 8 SSIDs
+    // overflowed the old 256 B and the later ones were dropped silently.
+    StaticJsonDocument<512> d;
     JsonArray arr = d.createNestedArray("networks");
     size_t used = 16;
     for (int pass = 0; pass < n && arr.size() < 8; pass++) {
@@ -606,6 +619,7 @@ static void doWifiScan() {
         used += name.length() + 4;
     }
     WiFi.scanDelete();
+    if (stopped && !pendWifi) WiFi.begin();   // resume the saved network
     String out; serializeJson(d, out);
     bleSend(out);
 }
