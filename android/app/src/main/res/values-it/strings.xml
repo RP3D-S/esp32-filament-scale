@@ -101,4 +101,18 @@
     <string name="cal_factor_current">Fattore attuale: %1$s</string>
     <string name="cal_factor_new">Nuovo fattore</string>
     <string name="apply">Applica</string>
+    <!-- Settings screen (texts of the original scale's Settings menu, i18n.h, plus app-only rows) -->
+    <string name="no_wifi">No WiFi</string>
+    <string name="rebooting">Riavvio...</string>
+    <string name="row_account">Account</string>
+    <string name="confirm">Conferma</string>
+    <string name="factory_reset">Ripristino di fabbrica</string>
+    <string name="factory_reset_q">Cancellare tutto? WiFi, account, lingua e calibrazione andranno persi.</string>
+    <string name="reboot">Riavvia</string>
+    <string name="reboot_q">Riavviare la bilancia?</string>
+    <string name="row_scale">Bilancia</string>
+    <string name="row_firmware">Firmware</string>
+    <string name="factory_hold">Tieni premuto per cancellare</string>
+    <string name="pw_show">Mostra</string>
+    <string name="pw_hide">Nascondi</string>
 </resources>

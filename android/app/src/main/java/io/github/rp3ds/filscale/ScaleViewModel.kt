@@ -249,6 +249,16 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendSecure("""{"cmd":"fb_logout"}""")
     }
 
+    /** Restarts the scale. Over the encrypted characteristic: it interrupts whatever is running. */
+    fun restartScale() {
+        if (!ble.sendSecure("""{"cmd":"restart"}""")) _state.update { it.copy(message = str(R.string.msg_bt_first)) }
+    }
+
+    /** Wipes Wi-Fi, account and calibration. The UI only calls this after a 3 s press-and-hold. */
+    fun factoryReset() {
+        if (!ble.sendSecure("""{"cmd":"factory_reset"}""")) _state.update { it.copy(message = str(R.string.msg_bt_first)) }
+    }
+
     /** RFID test screen: start/stop polling in test mode (keeps the last UID on the scale). */
     fun rfidTest(on: Boolean) = command(
         "/api/rfid/test",

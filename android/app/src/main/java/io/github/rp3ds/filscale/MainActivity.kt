@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -109,6 +110,8 @@ class MainActivity : ComponentActivity() {
                         onStopDiscover = vm::stopDiscoverScales,
                         onChoose = vm::chooseScale,
                         onForget = vm::forgetScale,
+                        onRestart = vm::restartScale,
+                        onFactoryReset = vm::factoryReset,
                     )
                 }
             }
@@ -133,6 +136,8 @@ fun ScaleScreen(
     onStopDiscover: () -> Unit,
     onChoose: (FoundScale) -> Unit,
     onForget: () -> Unit,
+    onRestart: () -> Unit,
+    onFactoryReset: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
@@ -176,6 +181,7 @@ fun ScaleScreen(
             s, { showSettings = false }, cal, onWizard = { showSettings = false; showWizard = true },
             onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
             onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
+            onRestart = onRestart, onFactoryReset = onFactoryReset,
         )
     }
     if (showWizard) CalibrationWizard(s, cal) { showWizard = false }
@@ -236,7 +242,10 @@ private fun SettingsDialog(
     onRfPower: (Int) -> Unit,
     onPickScale: () -> Unit,
     onForget: () -> Unit,
+    onRestart: () -> Unit,
+    onFactoryReset: () -> Unit,
 ) {
+    var showScale by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var showHost by remember { mutableStateOf(false) }
     var showWifi by remember { mutableStateOf(false) }
@@ -244,9 +253,44 @@ private fun SettingsDialog(
     var showRfid by remember { mutableStateOf(false) }
     var showLang by remember { mutableStateOf(false) }
 
+    SettingsScreen(
+        s,
+        SettingsActions(
+            onBack = onDismiss,
+            onScale = { showScale = true },
+            onWifi = { onScanWifi(); showWifi = true },
+            onAccount = { showFb = true },
+            onWizard = onWizard,
+            onManual = { showManual = true },
+            onLanguage = { showLang = true },
+            onRfid = { showRfid = true },
+        ),
+        onRestart = onRestart,
+        onFactoryReset = onFactoryReset,
+    )
+
+    if (showScale) ScaleDialog(s, { showScale = false }, onSearch, { showHost = true }, onPickScale, onForget)
+    if (showLang) LanguageDialog { showLang = false }
+    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
+    if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
+    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
+    if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
+    if (showManual) ManualFactorDialog(s.calibration, { showManual = false }) { cal.factor(it); showManual = false }
+}
+
+/** The "Scale" row: which scale this app talks to, how (Bluetooth / Wi-Fi), and the connection tools only the app needs. */
+@Composable
+private fun ScaleDialog(
+    s: ScaleState,
+    onDismiss: () -> Unit,
+    onSearch: () -> Unit,
+    onManualIp: () -> Unit,
+    onPickScale: () -> Unit,
+    onForget: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings)) },
+        title = { Text(stringResource(R.string.row_scale)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -269,17 +313,6 @@ private fun SettingsDialog(
                         },
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.label_account), fontWeight = FontWeight.Medium)
-                    Text(
-                        when (s.fbState) {
-                            2 -> s.fbEmail.ifBlank { stringResource(R.string.status_connected) }
-                            1 -> stringResource(R.string.connecting)
-                            3 -> stringResource(R.string.badge_error)
-                            else -> stringResource(R.string.badge_no_account)
-                        },
-                    )
-                }
                 Text(
                     stringResource(
                         R.string.hw_status,
@@ -288,58 +321,20 @@ private fun SettingsDialog(
                     ),
                     fontSize = 12.sp, color = Color(0xFF8A93A6),
                 )
-                if (s.firmware.isNotEmpty()) {
-                    Text(
-                        stringResource(R.string.firmware_line, s.firmware, "%.2f".format(s.calibration)),
-                        fontSize = 12.sp, color = Color(0xFF8A93A6),
-                    )
-                }
-                OutlinedButton(onClick = onPickScale, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { onDismiss(); onPickScale() }, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.btn_add_scale))
                 }
                 if (!s.noScale) {
-                    TextButton(onClick = onForget) { Text(stringResource(R.string.btn_forget_scale)) }
-                }
-                OutlinedButton(
-                    onClick = { onScanWifi(); showWifi = true },
-                    enabled = s.bleLinked,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.btn_configure_wifi)) }
-                OutlinedButton(onClick = { showFb = true }, enabled = s.bleLinked, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(if (s.fbState == 2) R.string.acct_title else R.string.btn_connect_account))
-                }
-                OutlinedButton(onClick = { showRfid = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.rfid_test))
-                }
-                OutlinedButton(onClick = onWizard, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(stringResource(R.string.cal_wizard))
-                        if (s.calibration > 0) Text("%.2f".format(Locale.US, s.calibration), color = Color(0xFF8A93A6))
-                    }
-                }
-                OutlinedButton(onClick = { showManual = true }, enabled = s.connected, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.cal_manual))
+                    TextButton(onClick = { onForget(); onDismiss() }) { Text(stringResource(R.string.btn_forget_scale)) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onSearch, enabled = !s.searching) { Text(stringResource(R.string.btn_search)) }
-                    OutlinedButton(onClick = { showHost = true }) { Text(stringResource(R.string.btn_manual_ip)) }
-                }
-                if (Build.VERSION.SDK_INT >= 33) {
-                    OutlinedButton(onClick = { showLang = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.language))
-                    }
+                    OutlinedButton(onClick = onManualIp) { Text(stringResource(R.string.btn_manual_ip)) }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
-
-    if (showLang) LanguageDialog { showLang = false }
-    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
-    if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
-    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
-    if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
-    if (showManual) ManualFactorDialog(s.calibration, { showManual = false }) { cal.factor(it); showManual = false }
 }
 
 /** Lists scales in Bluetooth range (strongest first); tapping one makes it the scale this app uses. */
@@ -401,6 +396,16 @@ private fun WifiDialog(
 ) {
     var ssid by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    var showPass by remember { mutableStateOf(false) }
+    var attempted by remember { mutableStateOf(false) }
+    // Connected to the network that was just chosen: let the "connected" line show for a moment, then
+    // close. Matching the SSID keeps a stale "connected" to the previous network from closing it early.
+    LaunchedEffect(attempted, s.wifiState, s.ssid) {
+        if (attempted && s.wifiState == 2 && s.ssid == ssid) {
+            delay(1_200)
+            onDismiss()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.wifi_title)) },
@@ -426,7 +431,12 @@ private fun WifiDialog(
                 OutlinedTextField(
                     value = pass, onValueChange = { pass = it }, singleLine = true,
                     label = { Text(stringResource(R.string.password)) },
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { showPass = !showPass }) {
+                            Text(stringResource(if (showPass) R.string.pw_hide else R.string.pw_show), fontSize = 12.sp)
+                        }
+                    },
                 )
                 if (s.wifiNeedsBoot) {
                     Text(
@@ -441,7 +451,9 @@ private fun WifiDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (ssid.isNotBlank()) onOk(ssid, pass) }) { Text(stringResource(R.string.btn_connect)) } },
+        confirmButton = {
+            TextButton(onClick = { if (ssid.isNotBlank()) { attempted = true; onOk(ssid, pass) } }) { Text(stringResource(R.string.btn_connect)) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
 }
@@ -556,18 +568,7 @@ private fun ManualFactorDialog(current: Double, onDismiss: () -> Unit, onOk: (Fl
 @Composable
 private fun LanguageDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
-    val options = listOf(
-        "" to stringResource(R.string.language_system),
-        "en" to "English",
-        "pt-PT" to "Português (Portugal)",
-        "pt-BR" to "Português (Brasil)",
-        "fr" to "Français",
-        "es" to "Español",
-        "de" to "Deutsch",
-        "it" to "Italiano",
-        "pl" to "Polski",
-        "zh" to "中文",
-    )
+    val options = listOf("" to stringResource(R.string.language_system)) + APP_LANGUAGES
     val current = if (Build.VERSION.SDK_INT >= 33) {
         ctx.getSystemService(LocaleManager::class.java).applicationLocales.toLanguageTags()
     } else ""

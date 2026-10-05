@@ -101,4 +101,18 @@
     <string name="cal_factor_current">当前系数：%1$s</string>
     <string name="cal_factor_new">新系数</string>
     <string name="apply">应用</string>
+    <!-- Settings screen (texts of the original scale's Settings menu, i18n.h, plus app-only rows) -->
+    <string name="no_wifi">无 WiFi</string>
+    <string name="rebooting">重启中...</string>
+    <string name="row_account">账户</string>
+    <string name="confirm">确认</string>
+    <string name="factory_reset">恢复出厂设置</string>
+    <string name="factory_reset_q">清除所有设置? WiFi、账户、语言和校准将丢失</string>
+    <string name="reboot">重启</string>
+    <string name="reboot_q">重启秤?</string>
+    <string name="row_scale">秤</string>
+    <string name="row_firmware">固件</string>
+    <string name="factory_hold">按住以清除</string>
+    <string name="pw_show">显示</string>
+    <string name="pw_hide">隐藏</string>
 </resources>
