@@ -115,4 +115,23 @@
     <string name="factory_hold">Maintenez pour effacer</string>
     <string name="pw_show">Afficher</string>
     <string name="pw_hide">Masquer</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Micrologiciel</string>
+    <string name="fw_installed">Version installée : %1$s</string>
+    <string name="fw_check">Rechercher des mises à jour</string>
+    <string name="fw_checking">Vérification…</string>
+    <string name="fw_latest">Vous avez la dernière version.</string>
+    <string name="fw_available">La version %1$s est disponible.</string>
+    <string name="fw_update">Mettre à jour</string>
+    <string name="fw_from_file">Installer depuis un fichier</string>
+    <string name="fw_downloading">Téléchargement…</string>
+    <string name="fw_arming">Préparation de la balance…</string>
+    <string name="fw_sending">Envoi à la balance…</string>
+    <string name="fw_restarting">La balance redémarre…</string>
+    <string name="fw_done">Mise à jour terminée. Version %1$s en cours.</string>
+    <string name="fw_failed">Échec de la mise à jour : %1$s</string>
+    <string name="fw_need_ble">Connexion Bluetooth avec la balance requise.</string>
+    <string name="fw_need_net">Le téléphone et la balance doivent être sur le même Wi-Fi.</string>
+    <string name="fw_keep_open">Gardez l\'application ouverte et la balance alimentée jusqu\'à la fin.</string>
+    <string name="fw_no_release">Aucune version du micrologiciel trouvée en ligne.</string>
 </resources>

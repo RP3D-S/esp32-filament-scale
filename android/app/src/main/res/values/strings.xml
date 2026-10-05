@@ -115,4 +115,23 @@
     <string name="factory_hold">Hold to erase</string>
     <string name="pw_show">Show</string>
     <string name="pw_hide">Hide</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Firmware</string>
+    <string name="fw_installed">Installed version: %1$s</string>
+    <string name="fw_check">Check for updates</string>
+    <string name="fw_checking">Checking…</string>
+    <string name="fw_latest">You have the latest version.</string>
+    <string name="fw_available">Version %1$s is available.</string>
+    <string name="fw_update">Update</string>
+    <string name="fw_from_file">Install from file</string>
+    <string name="fw_downloading">Downloading…</string>
+    <string name="fw_arming">Preparing the scale…</string>
+    <string name="fw_sending">Sending to the scale…</string>
+    <string name="fw_restarting">The scale is restarting…</string>
+    <string name="fw_done">Updated. Running version %1$s.</string>
+    <string name="fw_failed">Update failed: %1$s</string>
+    <string name="fw_need_ble">Bluetooth connection to the scale needed.</string>
+    <string name="fw_need_net">The phone and the scale must be on the same Wi-Fi.</string>
+    <string name="fw_keep_open">Keep the app open and the scale powered until it finishes.</string>
+    <string name="fw_no_release">No firmware release found online.</string>
 </resources>

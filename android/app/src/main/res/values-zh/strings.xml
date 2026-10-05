@@ -115,4 +115,23 @@
     <string name="factory_hold">按住以清除</string>
     <string name="pw_show">显示</string>
     <string name="pw_hide">隐藏</string>
+    <!-- Firmware update -->
+    <string name="fw_title">固件</string>
+    <string name="fw_installed">已安装版本：%1$s</string>
+    <string name="fw_check">检查更新</string>
+    <string name="fw_checking">正在检查…</string>
+    <string name="fw_latest">已是最新版本。</string>
+    <string name="fw_available">版本 %1$s 可用。</string>
+    <string name="fw_update">更新</string>
+    <string name="fw_from_file">从文件安装</string>
+    <string name="fw_downloading">正在下载…</string>
+    <string name="fw_arming">正在准备秤…</string>
+    <string name="fw_sending">正在发送到秤…</string>
+    <string name="fw_restarting">秤正在重启…</string>
+    <string name="fw_done">已更新，当前版本 %1$s。</string>
+    <string name="fw_failed">更新失败：%1$s</string>
+    <string name="fw_need_ble">需要与秤建立蓝牙连接。</string>
+    <string name="fw_need_net">手机和秤必须在同一个 Wi-Fi 网络中。</string>
+    <string name="fw_keep_open">更新完成前请保持应用打开并为秤供电。</string>
+    <string name="fw_no_release">在线未找到固件版本。</string>
 </resources>

@@ -115,4 +115,23 @@
     <string name="factory_hold">Tieni premuto per cancellare</string>
     <string name="pw_show">Mostra</string>
     <string name="pw_hide">Nascondi</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Firmware</string>
+    <string name="fw_installed">Versione installata: %1$s</string>
+    <string name="fw_check">Cerca aggiornamenti</string>
+    <string name="fw_checking">Controllo…</string>
+    <string name="fw_latest">Hai l\'ultima versione.</string>
+    <string name="fw_available">La versione %1$s è disponibile.</string>
+    <string name="fw_update">Aggiorna</string>
+    <string name="fw_from_file">Installa da file</string>
+    <string name="fw_downloading">Download…</string>
+    <string name="fw_arming">Preparazione della bilancia…</string>
+    <string name="fw_sending">Invio alla bilancia…</string>
+    <string name="fw_restarting">La bilancia si sta riavviando…</string>
+    <string name="fw_done">Aggiornato. In esecuzione la versione %1$s.</string>
+    <string name="fw_failed">Aggiornamento non riuscito: %1$s</string>
+    <string name="fw_need_ble">Serve la connessione Bluetooth con la bilancia.</string>
+    <string name="fw_need_net">Telefono e bilancia devono essere sullo stesso Wi-Fi.</string>
+    <string name="fw_keep_open">Tieni l\'app aperta e la bilancia alimentata fino alla fine.</string>
+    <string name="fw_no_release">Nessuna versione del firmware trovata online.</string>
 </resources>

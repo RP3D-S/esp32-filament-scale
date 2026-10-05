@@ -98,6 +98,7 @@ data class SettingsActions(
     val onManual: () -> Unit,
     val onLanguage: () -> Unit,
     val onRfid: () -> Unit,
+    val onFirmware: () -> Unit,
 )
 
 private enum class RowIcon { BLUETOOTH, WIFI, USER, TARGET, PENCIL, GLOBE, CHIP, REFRESH, TRASH }
@@ -167,9 +168,7 @@ fun SettingsScreen(s: ScaleState, a: SettingsActions, onRestart: () -> Unit, onF
                     SettingRow(RowIcon.GLOBE, TEXT, stringResource(R.string.language), langName, onClick = a.onLanguage)
                 }
                 SettingRow(RowIcon.CHIP, TEXT, "RFID", enabled = s.connected, onClick = a.onRfid)
-                // Informational: there is no over-the-air update on this scale, so no chevron (an inert row
-                // must not advertise a destination that does not exist).
-                SettingRow(RowIcon.REFRESH, TEXT, stringResource(R.string.row_firmware), s.firmware.ifBlank { "-" }, onClick = null)
+                SettingRow(RowIcon.REFRESH, TEXT, stringResource(R.string.row_firmware), s.firmware.ifBlank { "-" }, onClick = a.onFirmware)
                 SettingRow(RowIcon.REFRESH, ORANGE, stringResource(R.string.reboot), enabled = ble, onClick = { confirm = 1 })
                 // The one destructive row sits last, red.
                 SettingRow(RowIcon.TRASH, RED, stringResource(R.string.factory_reset), enabled = ble, onClick = { confirm = 2 })

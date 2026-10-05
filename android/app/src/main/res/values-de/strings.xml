@@ -115,4 +115,23 @@
     <string name="factory_hold">Gedrückt halten zum Löschen</string>
     <string name="pw_show">Anzeigen</string>
     <string name="pw_hide">Verbergen</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Firmware</string>
+    <string name="fw_installed">Installierte Version: %1$s</string>
+    <string name="fw_check">Nach Updates suchen</string>
+    <string name="fw_checking">Prüfe…</string>
+    <string name="fw_latest">Du hast die neueste Version.</string>
+    <string name="fw_available">Version %1$s ist verfügbar.</string>
+    <string name="fw_update">Aktualisieren</string>
+    <string name="fw_from_file">Aus Datei installieren</string>
+    <string name="fw_downloading">Lade herunter…</string>
+    <string name="fw_arming">Waage wird vorbereitet…</string>
+    <string name="fw_sending">Senden an die Waage…</string>
+    <string name="fw_restarting">Die Waage startet neu…</string>
+    <string name="fw_done">Aktualisiert. Es läuft Version %1$s.</string>
+    <string name="fw_failed">Update fehlgeschlagen: %1$s</string>
+    <string name="fw_need_ble">Bluetooth-Verbindung zur Waage erforderlich.</string>
+    <string name="fw_need_net">Handy und Waage müssen im selben WLAN sein.</string>
+    <string name="fw_keep_open">App geöffnet lassen und die Waage am Strom, bis es fertig ist.</string>
+    <string name="fw_no_release">Online wurde keine Firmware-Version gefunden.</string>
 </resources>

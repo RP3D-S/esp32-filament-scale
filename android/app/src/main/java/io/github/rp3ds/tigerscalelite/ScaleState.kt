@@ -54,6 +54,11 @@ data class ScaleState(
     val calRef: Int = 0,
     val calErr: String = "",
     val calDone: Boolean = true,
+    /** Over-the-air update, reported by the scale: phase 0 idle, 1 armed, 2 receiving, 3 done, 4 error; token for the upload. */
+    val otaPhase: Int = 0,
+    val otaPct: Int = 0,
+    val otaToken: String = "",
+    val otaErr: String = "",
     val searching: Boolean = false,
     /** BLE: the chosen scale (name), none chosen yet, nearby scales while picking, permission granted */
     val scaleName: String = "",
@@ -105,4 +110,8 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     calRef = if (j.has("cal_ref")) j.optInt("cal_ref") else calRef,
     calErr = if (j.has("cal_err")) j.optString("cal_err") else calErr,
     calDone = if (j.has("cal_done")) j.optInt("cal_done") == 1 else calDone,
+    otaPhase = if (j.has("ota")) j.optInt("ota") else otaPhase,
+    otaPct = if (j.has("ota_pct")) j.optInt("ota_pct") else otaPct,
+    otaToken = if (j.has("ota_tok")) j.optString("ota_tok") else otaToken,
+    otaErr = if (j.has("ota_err")) j.optString("ota_err") else otaErr,
 )

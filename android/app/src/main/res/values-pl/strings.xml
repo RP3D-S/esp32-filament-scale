@@ -115,4 +115,23 @@
     <string name="factory_hold">Przytrzymaj, aby wyczyścić</string>
     <string name="pw_show">Pokaż</string>
     <string name="pw_hide">Ukryj</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Oprogramowanie</string>
+    <string name="fw_installed">Zainstalowana wersja: %1$s</string>
+    <string name="fw_check">Sprawdź aktualizacje</string>
+    <string name="fw_checking">Sprawdzanie…</string>
+    <string name="fw_latest">Masz najnowszą wersję.</string>
+    <string name="fw_available">Dostępna jest wersja %1$s.</string>
+    <string name="fw_update">Aktualizuj</string>
+    <string name="fw_from_file">Zainstaluj z pliku</string>
+    <string name="fw_downloading">Pobieranie…</string>
+    <string name="fw_arming">Przygotowanie wagi…</string>
+    <string name="fw_sending">Wysyłanie do wagi…</string>
+    <string name="fw_restarting">Waga uruchamia się ponownie…</string>
+    <string name="fw_done">Zaktualizowano. Działa wersja %1$s.</string>
+    <string name="fw_failed">Aktualizacja nie powiodła się: %1$s</string>
+    <string name="fw_need_ble">Wymagane połączenie Bluetooth z wagą.</string>
+    <string name="fw_need_net">Telefon i waga muszą być w tej samej sieci Wi-Fi.</string>
+    <string name="fw_keep_open">Nie zamykaj aplikacji i nie odłączaj wagi do końca.</string>
+    <string name="fw_no_release">Nie znaleziono wersji oprogramowania online.</string>
 </resources>

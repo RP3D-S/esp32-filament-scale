@@ -115,4 +115,23 @@
     <string name="factory_hold">Segure para apagar</string>
     <string name="pw_show">Mostrar</string>
     <string name="pw_hide">Ocultar</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Firmware</string>
+    <string name="fw_installed">Versão instalada: %1$s</string>
+    <string name="fw_check">Procurar atualizações</string>
+    <string name="fw_checking">Verificando…</string>
+    <string name="fw_latest">Você está com a versão mais recente.</string>
+    <string name="fw_available">A versão %1$s está disponível.</string>
+    <string name="fw_update">Atualizar</string>
+    <string name="fw_from_file">Instalar de um arquivo</string>
+    <string name="fw_downloading">Baixando…</string>
+    <string name="fw_arming">Preparando a balança…</string>
+    <string name="fw_sending">Enviando para a balança…</string>
+    <string name="fw_restarting">A balança está reiniciando…</string>
+    <string name="fw_done">Atualizado. Executando a versão %1$s.</string>
+    <string name="fw_failed">A atualização falhou: %1$s</string>
+    <string name="fw_need_ble">É preciso a ligação Bluetooth com a balança.</string>
+    <string name="fw_need_net">O celular e a balança precisam estar no mesmo Wi-Fi.</string>
+    <string name="fw_keep_open">Mantenha o app aberto e a balança ligada até terminar.</string>
+    <string name="fw_no_release">Nenhuma versão de firmware encontrada online.</string>
 </resources>

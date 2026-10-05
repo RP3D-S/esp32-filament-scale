@@ -1,18 +1,26 @@
 package io.github.rp3ds.tigerscalelite
 
 import android.app.Application
+import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.io.File
+import java.io.IOException
 
 /**
  * Wi-Fi (WebSocket + HTTP) and BLE run in parallel and feed the same state. Commands
@@ -204,6 +212,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun connectWifi() {
+        if (otaHold) return
         wantWifi = true
         reconnectJob?.cancel()
         val host = _state.value.host
@@ -284,6 +293,98 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         val l = level.coerceIn(0, 4)
         _state.update { it.copy(rfPow = l) }
         command("/api/rfid/test", """{"power":$l}""", """{"cmd":"rf_power","level":$l}""")
+    }
+
+    // ---- Firmware update over the air (see FirmwareUpdater and firmware/src/ota.h) ------------------------
+    private val updater = FirmwareUpdater(app.cacheDir)
+    private val _fw = MutableStateFlow<FwUi>(FwUi.Idle)
+    val fw: StateFlow<FwUi> = _fw.asStateFlow()
+    private var fwJob: Job? = null
+    /** While an update streams, nothing may open a Wi-Fi link to the scale (each costs it heap). */
+    private var otaHold = false
+
+    /** Back to the start screen once the user has read the outcome; never while an update is running. */
+    fun fwReset() { if (_fw.value !is FwUi.Working) _fw.value = FwUi.Idle }
+
+    fun fwCheck() {
+        if (fwJob?.isActive == true) return
+        fwJob = viewModelScope.launch {
+            _fw.value = FwUi.Checking
+            val rel = runCatching { updater.latest() }.getOrNull()
+            _fw.value = when {
+                rel == null -> FwUi.Failed(str(R.string.fw_no_release))
+                !FirmwareUpdater.isNewer(rel.version, _state.value.firmware) -> FwUi.UpToDate(rel.version)
+                else -> FwUi.Available(rel)
+            }
+        }
+    }
+
+    fun fwUpdate(rel: FirmwareRelease) = runUpdate(rel, null)
+    fun fwInstallFile(uri: Uri) = runUpdate(null, uri)
+
+    private fun copyToCache(uri: Uri): File {
+        val ctx = getApplication<Application>()
+        val out = File(ctx.cacheDir, "firmware-local.bin")
+        ctx.contentResolver.openInputStream(uri)?.use { input -> out.outputStream().use { input.copyTo(it) } }
+            ?: throw IOException("cannot read the file")
+        if (out.length() < 100_000) throw IOException("this does not look like a firmware image")
+        return out
+    }
+
+    /**
+     * Download (or read the file) -> arm over the encrypted BLE link -> stream over Wi-Fi -> wait for the
+     * scale to come back. The scale only switches to the new image after it matches the MD5 we send, so a
+     * failure at any point leaves the old firmware running.
+     */
+    private fun runUpdate(rel: FirmwareRelease?, uri: Uri?) {
+        if (fwJob?.isActive == true) return
+        fwJob = viewModelScope.launch {
+            try {
+                val s0 = _state.value
+                if (!s0.bleLinked) throw IllegalStateException(str(R.string.fw_need_ble))
+                val host = s0.host.ifBlank { s0.ip }
+                if (host.isBlank()) throw IllegalStateException(str(R.string.fw_need_net))
+                if (s0.calPhase != 0) throw IllegalStateException("the calibration wizard is running")
+
+                val file = if (rel != null) {
+                    _fw.value = FwUi.Working(0, 0)
+                    updater.download(rel) { _fw.value = FwUi.Working(0, it) }
+                } else withContext(Dispatchers.IO) { copyToCache(uri!!) }
+                val size = file.length()
+                val md5 = withContext(Dispatchers.IO) { FirmwareUpdater.md5Hex(file) }
+
+                _fw.value = FwUi.Working(1, -1)
+                // Free the scale's heap for the update: no WebSocket from us while it receives.
+                wantWifi = false; reconnectJob?.cancel(); client.disconnect(); otaHold = true
+                _state.update { it.copy(otaToken = "", otaErr = "") }
+                if (!ble.sendSecure("""{"cmd":"ota_arm","size":$size,"md5":"$md5"}""")) {
+                    throw IllegalStateException(str(R.string.msg_bt_first))
+                }
+                val armed = withTimeoutOrNull(25_000) {
+                    _state.first { (it.otaToken.isNotEmpty() && it.otaPhase == 1) || it.otaErr.isNotEmpty() }
+                } ?: throw IOException("the scale did not answer")
+                if (armed.otaErr.isNotEmpty()) throw IOException("the scale refused it (${armed.otaErr})")
+
+                _fw.value = FwUi.Working(2, 0)
+                updater.push(file, host, armed.otaToken) { _fw.value = FwUi.Working(2, it) }
+
+                _fw.value = FwUi.Working(3, -1)
+                _state.update { it.copy(firmware = "", otaToken = "") }
+                delay(4_000)               // it restarts 1.5 s after answering: do not mistake the old firmware for the new one
+                wantWifi = true; otaHold = false; connectWifi()
+                val back = withTimeoutOrNull(75_000) {
+                    _state.first { it.wifiLinked && it.firmware.isNotEmpty() && (rel == null || it.firmware == rel.version) }
+                } ?: throw IOException("the scale did not come back in time")
+                _fw.value = FwUi.Done(back.firmware)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.d("TigerScaleLite", "firmware update failed: $e")
+                _fw.value = FwUi.Failed(e.message ?: e.javaClass.simpleName)
+            } finally {
+                if (otaHold) { otaHold = false; wantWifi = true; connectWifi() }
+            }
+        }
     }
 
     private fun command(path: String, httpBody: String, bleBody: String) {

@@ -115,4 +115,23 @@
     <string name="factory_hold">Mantén para borrar</string>
     <string name="pw_show">Mostrar</string>
     <string name="pw_hide">Ocultar</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Firmware</string>
+    <string name="fw_installed">Versión instalada: %1$s</string>
+    <string name="fw_check">Buscar actualizaciones</string>
+    <string name="fw_checking">Comprobando…</string>
+    <string name="fw_latest">Tienes la última versión.</string>
+    <string name="fw_available">La versión %1$s está disponible.</string>
+    <string name="fw_update">Actualizar</string>
+    <string name="fw_from_file">Instalar desde un archivo</string>
+    <string name="fw_downloading">Descargando…</string>
+    <string name="fw_arming">Preparando la báscula…</string>
+    <string name="fw_sending">Enviando a la báscula…</string>
+    <string name="fw_restarting">La báscula se está reiniciando…</string>
+    <string name="fw_done">Actualizado. Versión en uso: %1$s.</string>
+    <string name="fw_failed">La actualización falló: %1$s</string>
+    <string name="fw_need_ble">Se necesita la conexión Bluetooth con la báscula.</string>
+    <string name="fw_need_net">El teléfono y la báscula deben estar en la misma Wi-Fi.</string>
+    <string name="fw_keep_open">Mantén la app abierta y la báscula encendida hasta que termine.</string>
+    <string name="fw_no_release">No se encontró ninguna versión del firmware en línea.</string>
 </resources>

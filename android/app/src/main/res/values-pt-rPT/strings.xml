@@ -115,4 +115,23 @@
     <string name="factory_hold">Mantenha para apagar</string>
     <string name="pw_show">Mostrar</string>
     <string name="pw_hide">Ocultar</string>
+    <!-- Firmware update -->
+    <string name="fw_title">Firmware</string>
+    <string name="fw_installed">Versão instalada: %1$s</string>
+    <string name="fw_check">Procurar atualizações</string>
+    <string name="fw_checking">A verificar…</string>
+    <string name="fw_latest">Tem a versão mais recente.</string>
+    <string name="fw_available">A versão %1$s está disponível.</string>
+    <string name="fw_update">Atualizar</string>
+    <string name="fw_from_file">Instalar de um ficheiro</string>
+    <string name="fw_downloading">A descarregar…</string>
+    <string name="fw_arming">A preparar a balança…</string>
+    <string name="fw_sending">A enviar para a balança…</string>
+    <string name="fw_restarting">A balança está a reiniciar…</string>
+    <string name="fw_done">Atualizado. A executar a versão %1$s.</string>
+    <string name="fw_failed">A atualização falhou: %1$s</string>
+    <string name="fw_need_ble">É preciso a ligação Bluetooth à balança.</string>
+    <string name="fw_need_net">O telemóvel e a balança têm de estar na mesma rede Wi-Fi.</string>
+    <string name="fw_keep_open">Mantenha a app aberta e a balança ligada até terminar.</string>
+    <string name="fw_no_release">Não foi encontrada nenhuma versão do firmware online.</string>
 </resources>
