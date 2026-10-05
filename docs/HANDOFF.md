@@ -86,13 +86,22 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    Still to do: use the scale for a while with the app unplugged from USB and check that no `[LOOP]` line appears.
    A second, different weight (217 g, the first calibration used 250 g) reads 217 g before and after the change,
    which confirms the factor 943.37 and that the tare change did not touch the grams conversion.
-2. **The phone's Wi-Fi link to the scale is flaky, the app lives mostly on BLE.** From the phone: 24 `wifi link down:
-   failed to connect to /<scale> (port 80) ... after 4000ms` in 150 s, only 3 connections. From the PC the same
-   scale answers fine (ping 11-53 ms, HTTP 100-250 ms, occasional ~1 s spike). Not caused by the stalls (it kept
-   happening with none). Not investigated yet: look at the phone's side (Wi-Fi power save, AP/band isolation) and at
-   how many connections AsyncTCP accepts with ~30 KB of free heap.
-3. Heap is tight on the classic ESP32 (largest free block ~17-37 KB, lower the longer it has been up). AsyncTCP stack
-   was cut to 7 KB and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS session.
+2. **Phone Wi-Fi link to the scale: understood, two mitigations in, to be watched.** Measured with adb over Wi-Fi:
+   with the screen off the phone is in Doze (`mWakefulness=Dozing`, `deviceidle mState=IDLE`), the network of
+   background apps is cut, and the app logged 24 `failed to connect ... after 4000ms` in 150 s (phone->scale ping
+   274 ms average). With the screen on: 0 failures, ping 44 ms. In normal use (one phone, app open, BLE + Wi-Fi
+   together, scale freshly booted) 200 s gave no cloud failure, no `[LOOP]` stall and a stable largest free block
+   of ~34.8 KB, with only one transient 6 s "wifi link stale" about 30 s after boot.
+   The real weakness is the heap under client churn: a second WebSocket client plus repeated reconnects pushed the
+   largest free block down to ~19 KB, and then **every cloud heartbeat failed with `[FB] heartbeat HTTP -1`** (TLS
+   needs contiguous heap) and the scale refused TCP connections for several seconds. One WebSocket client costs
+   only ~4 KB and is harmless. Mitigations in place: the firmware keeps at most 2 WebSocket clients, oldest first
+   (`ws.cleanupClients(2)`), and the app drops its Wi-Fi link when it goes to the background (`onBackground()`,
+   Bluetooth stays) and brings it back in `onForeground()`. If `heartbeat HTTP -1` ever shows up in a normal run,
+   look at the heap first (`[FB] heap free=... largest=...` prints every 30 s).
+3. Heap is tight on the classic ESP32 (largest free block ~19-37 KB, lower with more clients connected). AsyncTCP
+   stack was cut to 7 KB and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS
+   session, and treat every new client connection as costing contiguous heap that the cloud TLS needs.
 4. BLE link occasionally drops (supervision timeout, status 8; the app logs `ble link stale ... -> reconnect`) when
    Wi-Fi/TLS is busy; the app reconnects in ~3 s.
 5. No OTA (single 3.9 MB app partition). Flash by USB.
