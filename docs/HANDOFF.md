@@ -58,13 +58,46 @@ One PN532, no servo, no screen, no battery.
   first-calibration side panel (2 s after connecting, then every 5 min, never during a weighing).
   Tested on hardware: every step, rejection of 100 g, back/cancel, and a full run with a 250 g weight.
 - **Settings menu in the app** (`SettingsScreen.kt`) laid out like the original's list: Scale, WiFi, Account,
-  Calibration Wizard (shows the factor), Manual calibration, Language, RFID, Firmware (read-only, no OTA), Restart
+  Calibration Wizard (shows the factor), Manual calibration, Language, RFID, Firmware (opens the update screen), Restart
   (amber) and Factory reset (red, last). Each row shows its current value. Left out because the hardware is absent:
   volume, screen, power-off, live view. The "Scale" row holds the app-only connection tools (switch/forget scale,
   search, manual IP). Icons are drawn with the same primitives as the original (rings, bars, pill outlines).
 - Restart and factory reset go over the **encrypted** BLE characteristic (`restart`, `factory_reset`). The app
   asks for a confirmation; the factory reset button only fires after a 3 s press-and-hold. It wipes Wi-Fi, account
   and calibration (NVS namespace `scale`), and then the scale restarts. The firmware no longer asks for BOOT.
+- **OTA from the PC (development)**, tested on hardware. The partition table has two app slots of 1.94 MB
+  (`app0` / `app1`, the firmware is ~1.66 MB, so ~19 % spare) plus `otadata`; `nvs` kept its offset, so Wi-Fi,
+  account and calibration survived the switch. Update over Wi-Fi with
+  `pio run -e esp32dev_hsu_ota -t upload --upload-port <scale-ip>` (the IP, not the `.local` name: mDNS does not
+  resolve on this Windows PC). The password is generated on the first build into `firmware/.ota_password`
+  (git-ignored, compiled into the firmware, passed to espota as `--auth`): a scale can only be updated from a PC that
+  has that file, otherwise flash it once by USB. The boot log prints which slot runs (`[BOOT] running from app1`).
+  While an update runs the cloud task is paused (`fbPause()`) and WebSocket clients are closed: the first attempt
+  died at 16 % when a TLS heartbeat starved the TCP buffers (`write() errno 11`). This espota route takes 4 to 8
+  minutes: espota sends 1 KB and waits for each answer, so its speed is 1 KB per round trip (25 KB/s at 40 ms, 3.6 KB/s
+  at the ~280 ms an idle ESP32 radio in power save takes to answer; both showed up in one upload). It is kept as the
+  fallback; the streamed route below replaces it. Windows may ask to allow Python through the firewall the first
+  time. Changing the partition table needs one USB flash; after that every update can go by OTA.
+- **Streamed OTA (`firmware/src/ota.cpp`, used by the app and by `firmware/scripts/ota_push.py`)**: the image goes to
+  the scale as one HTTP POST that TCP can stream, so the speed is not tied to the round trip: **~30 s for the 1.67 MB
+  image (53-58 KB/s)**, about the limit of the flash writes. Flow: (1) arm with the size and the MD5: over the
+  encrypted BLE link (`ota_arm`, the app) or over HTTP with a password challenge (`GET /api/ota/nonce`, then
+  `POST /api/ota/arm` with `sha256(nonce + password)`, the dev PC); the scale answers a one-time token (BLE `ota_tok`);
+  (2) `loop()` pauses the cloud and closes the WebSocket clients, then reports `ota` = 1; (3) `POST /api/ota` with the
+  header `X-OTA-Token` and the exact length (without a valid token the route does not exist: 404); the image is
+  written to the other slot and the slot only switches if the MD5 matches; (4) the scale restarts. An armed update
+  nobody uploads expires after 120 s, and any failure leaves the running firmware untouched. Progress is in
+  `GET /api/ota/status` and in the BLE/WebSocket fields `ota` (0 idle, 1 armed, 2 receiving, 3 done, 4 error) and
+  `ota_pct`. Dev push: `python firmware/scripts/ota_push.py <scale-ip>`.
+- **Firmware screen in the app** (`FirmwareDialog.kt`, `FirmwareUpdater.kt`, orchestration in `ScaleViewModel`):
+  Settings > Firmware shows the installed version and offers "Check for updates" (newest non-draft GitHub release
+  that has `firmware.bin` + `firmware.json`; the SHA-256 of the download is checked against the manifest) and
+  "Install from file". The phone needs the BLE link (to arm) and the scale's Wi-Fi address (to upload); while the
+  update streams, the app opens no Wi-Fi link of its own to the scale (each costs heap). Tested on hardware with
+  "Install from file": 0.2.0 -> 0.2.1 in 28.6 s of streaming, the scale came back on `app0` (it was on `app1`).
+  Publish a release with `python firmware/scripts/release_firmware.py` (needs `gh`; it builds, writes
+  `firmware/dist/firmware.{bin,json}` and creates `fw-v<version>`; `--dry-run` only writes the files). The release
+  source is `FirmwareUpdater.RELEASES_API`: change it if the GitHub repository is renamed.
 - Wi-Fi and TigerTag account dialogs: show/hide password, and each closes by itself once the scale is connected to
   the chosen network / signed in to the account (a failed attempt keeps it open with the error).
 
@@ -101,13 +134,20 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    goes to the background (`onBackground()`, Bluetooth stays; tested: 0 attempts in 40 s, Wi-Fi back 0.4 s after
    returning) and brings it back in `onForeground()`. If `heartbeat HTTP -1` ever shows up in a normal run,
    look at the heap first (`[FB] heap free=... largest=...` prints every 30 s).
-3. Heap is tight on the classic ESP32 (largest free block ~19-37 KB, lower with more clients connected). AsyncTCP
+3. Heap is tight on the classic ESP32 (largest free block ~17-37 KB, lower with more clients connected; right after
+   a reboot with the app reconnecting it read 17 396 and the first heartbeat failed with `HTTP -11`, a read
+   timeout, twice in one session: not explained yet, watch `[FB] heartbeat HTTP` together with `[FB] heap`). AsyncTCP
    stack was cut to 7 KB and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS
    session, and treat every new client connection as costing contiguous heap that the cloud TLS needs.
 4. BLE link occasionally drops (supervision timeout, status 8; the app logs `ble link stale ... -> reconnect`) when
    Wi-Fi/TLS is busy; the app reconnects in ~3 s.
-5. No OTA (single 3.9 MB app partition). Flash by USB.
-6. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, OTA, web UI from `data/www`,
+5. **OTA: the online path is untested, and there is no rollback.** "Check for updates" and the download have not run
+   against a real release (none is published yet, and publishing is visible to everyone): publish one with
+   `release_firmware.py` and try it from the app. What the app shows on screen during an update was not seen by
+   me (I only had the scale console and the app log). There is no automatic rollback (the bootloader of this
+   platform is not built for it): a firmware that boots but is broken needs a USB flash. The scale never pulls from
+   GitHub itself: that needs TLS, and the heap cannot afford it.
+6. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, web UI from `data/www`,
    rack/position editing, language sync with the account.
 7. Debug logging to remove when done diagnosing: the firmware's `[LOOP]` timing (keep it cheap, it only prints on slow
    passes) and the app's `TigerScaleLite` log. The app's `ble frame gap` line is noise: it fires above 1.5 s, but the scale
