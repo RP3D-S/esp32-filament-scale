@@ -84,8 +84,8 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    `get_value(n)`, `get_units(n)`, `tare(n)` and `wait_ready_timeout()` all block for n/10 s. The only ones left are
    `doCalibrate()` (the old one-shot `/api/calibrate`, not used by the wizard) and the tare in `setup()`.
    Still to do: use the scale for a while with the app unplugged from USB and check that no `[LOOP]` line appears.
-   The weight the owner puts on the platform reads 217 g, the same before and after the change; if it should be
-   250 g the factor deserves another look.
+   A second, different weight (217 g, the first calibration used 250 g) reads 217 g before and after the change,
+   which confirms the factor 943.37 and that the tare change did not touch the grams conversion.
 2. **The phone's Wi-Fi link to the scale is flaky, the app lives mostly on BLE.** From the phone: 24 `wifi link down:
    failed to connect to /<scale> (port 80) ... after 4000ms` in 150 s, only 3 connections. From the PC the same
    scale answers fine (ping 11-53 ms, HTTP 100-250 ms, occasional ~1 s spike). Not caused by the stalls (it kept
