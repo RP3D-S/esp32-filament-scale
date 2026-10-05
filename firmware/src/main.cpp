@@ -11,6 +11,9 @@
 #include <Preferences.h>
 #include <HX711.h>
 #include <NimBLEDevice.h>
+#include <ArduinoOTA.h>
+#include <esp_ota_ops.h>
+#include "ota.h"
 #include "firebase.h"
 #include "workflow.h"
 #include <Adafruit_PN532.h>
@@ -592,9 +595,22 @@ static String buildCalFrame(bool full, CalState &st) {
     String out; serializeJson(d, out); return out;
 }
 
+// OTA progress for the app: ota = OtaPhase (0 idle, 1 armed, 2 receiving, 3 done, 4 error), ota_pct = 0..100.
+struct OtaState { int phase = -1, pct = -1; };
+
+static String buildOtaFrame(bool full, OtaState &st) {
+    StaticJsonDocument<64> d;
+    int ph = otaPhase(), pct = otaPercent();
+    putField<int>(d, "ota", ph, st.phase, full);
+    putField<int>(d, "ota_pct", pct, st.pct, full);
+    if (d.size() == 0) return "";
+    String out; serializeJson(d, out); return out;
+}
+
 static FrameState wsState, bleState;
 static RfState wsRf, bleRf;
 static CalState wsCal, bleCal;
+static OtaState wsOta, bleOta;
 
 // ---- BLE (NimBLE) ----------------------------------------------------------
 // Same JSON as the WebSocket, over one notify characteristic. Commands come back
@@ -701,6 +717,13 @@ public:
             // Wipes Wi-Fi, account and calibration. The encrypted link (paired phone) is the authority;
             // the app makes the user hold a button for 3 s before it sends this.
             pendFactoryReset = true;
+        } else if (!strcmp(cmd, "ota_arm")) {
+            // The app is about to push a firmware image over Wi-Fi. The one-time token comes back over this
+            // encrypted link, so only the paired phone can start an update.
+            String tok; const char *err = "";
+            if (calActive()) err = "busy";
+            else if (otaArm(d["size"] | 0u, d["md5"] | "", tok, err)) { bleSend(String("{\"ota_tok\":\"") + tok + "\"}"); return; }
+            bleSend(String("{\"ota_err\":\"") + err + "\"}");
         }
     }
 };
@@ -768,7 +791,7 @@ static void enqueueAvatar(const String &url) {
 
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
-        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState();
+        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState();
         for (int i = 0; i < bleQueued; i++) bleQueue[i] = "";
         bleQueued = 0;
         return;
@@ -778,6 +801,7 @@ static void pumpBle(bool periodicFull) {
     bleEnqueue(buildFrame(full, bleState, true));
     bleEnqueue(buildRfFrame(full, bleRf));
     bleEnqueue(buildCalFrame(full, bleCal));
+    bleEnqueue(buildOtaFrame(full, bleOta));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -1011,11 +1035,56 @@ static void setupRoutes() {
     server.onNotFound([](AsyncWebServerRequest *r) { r->send(404, "text/plain", "not found"); });
 }
 
+// ---- OTA: update over Wi-Fi from the PC (development) -----------------------
+// pio run -e esp32dev_hsu_ota -t upload --upload-port <scale-ip>. The password is compiled in from
+// firmware/.ota_password (see scripts/ota_password.py); no password means no OTA.
+#ifndef OTA_PASSWORD
+#define OTA_PASSWORD ""
+#endif
+
+static void setupOta(const char *host) {
+    if (!OTA_PASSWORD[0]) { Serial.println("[OTA] disabled: no password compiled in"); return; }
+    ArduinoOTA.setHostname(host);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.setMdnsEnabled(false);       // loop() runs the one MDNS.begin() once Wi-Fi is up
+    // The update streams ~1.6 MB over TCP while a TLS handshake to the cloud wants ~40 KB of the same heap;
+    // the first attempt died at 16 % when the TCP stack ran out of buffers (errno 11) during a heartbeat.
+    // So: no cloud traffic and no WebSocket clients for the length of the update.
+    ArduinoOTA.onStart([]() {
+        Serial.println("[OTA] start");
+        bool idle = fbPause(true, 6000);
+        ws.closeAll();
+        // espota sends 1 KB and waits for the answer, so every round trip counts: with Wi-Fi modem sleep (the
+        // default) an idle radio answers in ~250 ms and a full update took 7 minutes instead of ~70 s.
+        WiFi.setSleep(false);
+        Serial.printf("[OTA] cloud paused (%s), heap free=%u largest=%u\n", idle ? "idle" : "request still running",
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+    });
+    ArduinoOTA.onEnd([]() { Serial.println("[OTA] done, restarting"); });
+    ArduinoOTA.onProgress([](unsigned p, unsigned t) {
+        static int last = -1;
+        int pct = t ? (int)((uint64_t)p * 100 / t) : 0;
+        if (pct / 10 != last / 10) { Serial.printf("[OTA] %d%%\n", pct); }
+        last = pct;
+    });
+    ArduinoOTA.onError([](ota_error_t e) {
+        Serial.printf("[OTA] error %u\n", (unsigned)e);
+        WiFi.setSleep(true);
+        fbPause(false);
+    });
+    ArduinoOTA.begin();
+    Serial.println("[OTA] ready");
+}
+
 // ---- setup / loop ---------------------------------------------------------
 void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.println("\n[BOOT] filament scale " FW_VERSION);
+    {
+        const esp_partition_t *run = esp_ota_get_running_partition();
+        if (run) Serial.printf("[BOOT] running from %s at 0x%x (size 0x%x)\n", run->label, (unsigned)run->address, (unsigned)run->size);
+    }
     Serial.printf("[HEAP] boot %u\n", (unsigned)ESP.getFreeHeap());
 
     prefs.begin("scale", true);
@@ -1059,7 +1128,17 @@ void setup() {
         fbBegin(macHex);
     }
     setupRoutes();
+    {
+        // Streamed over-the-air update from the app or a dev PC (see ota.h). The hooks free heap while it runs.
+        static const OtaHooks hooks = {
+            []() { fbPause(true, 6000); ws.closeAll(); },
+            []() { fbPause(false); },
+            []() { pendRestartAt = millis() + 1500; },
+        };
+        otaInit(server, hooks, OTA_PASSWORD);
+    }
     server.begin();
+    setupOta(mdnsName.c_str());
     Serial.printf("[HEAP] after server %u largest %u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
@@ -1081,6 +1160,8 @@ void loop() {
     auto lap = [&](int i) { uint32_t n = millis(); secMs[i] += n - lapAt; lapAt = n; };
     static uint32_t lastWs = 0, lastFull = 0;
 
+    ArduinoOTA.handle();   // blocks for the length of an update, which is the intent; a no-op otherwise
+    otaLoop();
     calTick();
     // While the wizard runs it owns the load cell: tare / factor changes wait until it is done.
     if (pendTare)           { pendTare = false; if (!calActive()) doTare(); }
@@ -1161,10 +1242,13 @@ void loop() {
             if (rf.length() && ws.availableForWriteAll()) ws.textAll(rf);
             String cf = buildCalFrame(full, wsCal);
             if (cf.length() && ws.availableForWriteAll()) ws.textAll(cf);
+            String of = buildOtaFrame(full, wsOta);
+            if (of.length() && ws.availableForWriteAll()) ws.textAll(of);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
             wsRf = RfState();
             wsCal = CalState();
+            wsOta = OtaState();
         }
         lap(6);
         // At most 2 WebSocket clients, oldest closed first. A phone that went to sleep (Doze) leaves a dead

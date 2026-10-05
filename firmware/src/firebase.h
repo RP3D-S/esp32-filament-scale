@@ -71,5 +71,11 @@ typedef String (*FbCommandHandler)(const String &type, float value, bool &ok);
 void fbSetCommandHandler(FbCommandHandler h);
 void fbForceBeat();
 
+/**
+ * Stops (on) or resumes (off) all cloud traffic. Pausing waits up to timeoutMs for a request in flight
+ * to finish and returns false if it did not. Used around over-the-air updates.
+ */
+bool fbPause(bool on, uint32_t timeoutMs = 0);
+
 /** Account colour as RRGGBB (from the user's profile), empty when signed out. */
 String fbAvatarColor();

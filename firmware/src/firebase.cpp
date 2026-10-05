@@ -598,6 +598,17 @@ static bool sendHeartbeat(bool full) {
     return false;
 }
 
+static volatile bool gPaused = false;   // set by fbPause(); the task stops all cloud traffic
+static volatile bool gIdle = false;     // the task has seen the pause and no request is in flight
+
+bool fbPause(bool on, uint32_t timeoutMs) {
+    gPaused = on;
+    if (!on) return true;
+    uint32_t t0 = millis();
+    while (!gIdle && millis() - t0 < timeoutMs) delay(50);   // a request in flight finishes first
+    return gIdle;
+}
+
 static void fbTask(void *) {
     uint32_t lastBeat = 0;
     bool needFull = true;
@@ -607,6 +618,10 @@ static void fbTask(void *) {
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(400));
+
+        // Paused for an over-the-air update: it needs the heap and the TCP buffers that a TLS session takes.
+        if (gPaused) { gIdle = true; continue; }
+        gIdle = false;
 
         if (gPendLogout) {
             gPendLogout = false;

@@ -1,6 +1,9 @@
-# Single big app slot: Wi-Fi + BLE together do not fit in a 1.5 MB OTA slot.
-# Consequence: no over-the-air updates, flash by USB.
+# Two OTA app slots (1.94 MB each, the firmware is ~1.6 MB) so the scale can be updated over the air.
+# nvs keeps its old offset and size: saved Wi-Fi, account and calibration survive the switch from the old
+# single-slot table. otadata (new) records which slot boots.
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,
-app0,     app,  factory, 0x10000,  0x3D0000,
-spiffs,   data, spiffs,  0x3E0000, 0x20000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x1F0000,
+app1,     app,  ota_1,   0x200000, 0x1F0000,
+spiffs,   data, spiffs,  0x3F0000, 0x10000,

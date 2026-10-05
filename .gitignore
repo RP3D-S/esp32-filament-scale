@@ -133,3 +133,9 @@ __pycache__/
 # PlatformIO drops a preprocessed copy of the sketch next to it when a build
 # is interrupted. It is generated, 550 KB, and must never reach a commit.
 *.ino.cpp
+
+# OTA password of the scales built from this PC (generated on the first firmware build, see firmware/scripts/ota_password.py)
+.ota_password
+
+# Output of firmware/scripts/release_firmware.py
+firmware/dist/
