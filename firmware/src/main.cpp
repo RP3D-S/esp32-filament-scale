@@ -222,15 +222,196 @@ static void doTare() {
     tagLive = "";
 }
 
+// The NVS key "cal" doubles as the "has ever been calibrated" sentinel (same idea as the
+// original's calFactor key): the app nags until it exists, factory reset erases it.
+static bool calDone = false;
+
+static void saveCalFactor(float f) {
+    prefs.begin("scale", false);
+    prefs.putFloat("cal", f);
+    prefs.end();
+    calDone = true;
+}
+
 static void doCalibrate(float grams) {
     if (grams <= 0 || !scale.wait_ready_timeout(1000)) return;
     double v = scale.get_value(10);          // counts above the tare offset
     if (v == 0) return;
     calFactor = (float)(v / grams);
     scale.set_scale(calFactor);
-    prefs.begin("scale", false);
-    prefs.putFloat("cal", calFactor);
-    prefs.end();
+    saveCalFactor(calFactor);
+}
+
+// ---- Calibration wizard ---------------------------------------------------
+// Port of the original's 3-step wizard (runCalibrationWizard): 1 empty + TARE (and the zero must
+// hold), 2 pick the reference weight, 3 place it and CALIBRATE once the reading is steady.
+// The original blocks the main loop on its LCD; here it is a non-blocking state machine driven
+// by commands from the app, so BLE/Wi-Fi keep flowing. The app only draws the screens.
+enum CalPhase { CAL_OFF = 0, CAL_TARE_WAIT, CAL_TARING, CAL_REF, CAL_PLACE, CAL_MEASURING, CAL_SAVED, CAL_ERROR };
+enum CalCmd   { CC_NONE = 0, CC_START, CC_TARE, CC_REF, CC_MEASURE, CC_BACK, CC_CANCEL };
+
+static const float    CAL_REF_MIN_G       = 150.0f;    // keypad range of the original
+static const float    CAL_REF_MAX_G       = 4500.0f;
+static const float    CAL_MIN_FACTOR      = 0.5f;      // below this the reading is not plausible
+static const float    CAL_STABLE_BAND_G   = 1.0f;      // last 6 samples within 1 g
+static const uint32_t CAL_SAMPLE_MS       = 250;
+static const uint32_t CAL_SETTLE_MS       = 2000;      // pause before the 30-sample average
+static const uint32_t CAL_SAVED_SHOW_MS   = 2000;
+static const uint32_t CAL_ERROR_SHOW_MS   = 2500;
+static const uint32_t CAL_STEP_TIMEOUT_MS = 20000;     // taring / measuring that never completes
+static const uint32_t CAL_IDLE_TIMEOUT_MS = 180000;    // app gone mid-wizard: give the scale back
+
+static volatile int   pendCalCmd = CC_NONE;
+static volatile float pendCalArg = 0;
+static int      calPhase = CAL_OFF;
+static bool     calStable = false;
+static float    calRef = 0;
+static String   calErr;                  // "" | "zero" (pan would not hold zero) | "read" | "ref"
+static float    calSavedFactor = 0;
+static long     calSavedOffset = 0, calOffset = 0;
+static uint32_t calPhaseAt = 0, calLastCmdMs = 0, calNextAt = 0;
+static int64_t  calSum = 0;
+static int      calN = 0, calSub = 0, calChk = 0;
+static float    calRing[6];
+static int      calRingN = 0, calRingI = 0;
+
+static inline bool calActive() { return calPhase != CAL_OFF; }
+
+static void calCommand(int cmd, float arg = 0) { pendCalArg = arg; pendCalCmd = cmd; }
+
+static void calSetPhase(int p) { calPhase = p; calPhaseAt = millis(); calSub = 0; }
+
+// Leaves the wizard. Not saved = put the tare offset back, exactly as the original's cancel path.
+static void calEnd(bool saved) {
+    if (!saved) scale.set_offset(calSavedOffset);
+    calStable = false;
+    calSetPhase(CAL_OFF);
+    filtered = 0; shownWeight = 0;       // the weigh loop restarts from zero
+}
+
+static bool calReadRaw(long &v) {
+    if (!scale.is_ready()) return false;
+    v = scale.read();
+    return true;
+}
+
+static void calFail(const char *why) {
+    calErr = why;
+    Serial.printf("[CAL] error: %s\n", why);
+    calSetPhase(CAL_ERROR);
+}
+
+static void calTick() {
+    uint32_t now = millis();
+    int cmd = pendCalCmd; float arg = pendCalArg; pendCalCmd = CC_NONE;
+    if (cmd != CC_NONE) calLastCmdMs = now;
+
+    if (calPhase == CAL_OFF) {
+        if (cmd == CC_START) {
+            wfStop();                                   // no weigh session may run underneath
+            calSavedFactor = calFactor;
+            calSavedOffset = scale.get_offset();
+            calErr = ""; calStable = false; calRef = 0;
+            calSetPhase(CAL_TARE_WAIT);
+            Serial.println("[CAL] start");
+        }
+        return;
+    }
+
+    // Commands
+    if (cmd == CC_CANCEL && calPhase != CAL_SAVED) { Serial.println("[CAL] cancelled"); calEnd(false); return; }
+    if (cmd == CC_BACK) {
+        calErr = ""; calStable = false;
+        if (calPhase == CAL_TARE_WAIT) { Serial.println("[CAL] cancelled"); calEnd(false); return; }
+        if (calPhase == CAL_REF) calSetPhase(CAL_TARE_WAIT);
+        else if (calPhase == CAL_PLACE) calSetPhase(CAL_REF);
+    } else if (cmd == CC_TARE && calPhase == CAL_TARE_WAIT) {
+        calErr = ""; calSum = 0; calN = 0;
+        calSetPhase(CAL_TARING);
+    } else if (cmd == CC_REF && calPhase == CAL_REF) {
+        if (arg >= CAL_REF_MIN_G && arg <= CAL_REF_MAX_G) {
+            calRef = arg; calErr = ""; calStable = false; calRingN = 0; calRingI = 0; calNextAt = 0;
+            calSetPhase(CAL_PLACE);
+            Serial.printf("[CAL] reference %.0f g\n", calRef);
+        } else calErr = "ref";
+    } else if (cmd == CC_MEASURE && calPhase == CAL_PLACE && calStable) {
+        calSum = 0; calN = 0;
+        calSetPhase(CAL_MEASURING);
+    }
+
+    now = millis();   // calSetPhase() above stamped a later time; an unsigned now - stamp would wrap
+    // Counts per gram used to judge "within 1 g" while the real factor is not known yet. The
+    // original trusts the stored factor, but a never-calibrated scale can hold garbage (this one
+    // held 0.072: 1 g = 0.07 counts, so the zero could never hold). Below 50 fall back to a typical
+    // 5 kg cell + HX711 value; the real factor is computed from the measurement anyway.
+    float dispFactor = fabsf(calSavedFactor) >= 50.0f ? fabsf(calSavedFactor) : 400.0f;
+    long r;
+    switch (calPhase) {
+    case CAL_TARING:
+        if (calSub == 0) {                              // 20-sample tare
+            if (calReadRaw(r)) {
+                calSum += r;
+                if (++calN >= 20) {
+                    calOffset = (long)(calSum / calN);
+                    scale.set_offset(calOffset);
+                    calSub = 1; calChk = 0; calNextAt = now + CAL_SAMPLE_MS;
+                }
+            }
+        } else if ((int32_t)(now - calNextAt) >= 0 && calReadRaw(r)) {
+            // The pan must HOLD that zero: 4 quarter-second reads within 1 g, else ask again.
+            float g = (float)(r - calOffset) / dispFactor;
+            Serial.printf("[CAL] zero check %d: %.2f g\n", calChk + 1, g);
+            if (fabsf(g) >= 1.0f) { calErr = "zero"; calSetPhase(CAL_TARE_WAIT); break; }
+            calNextAt = now + CAL_SAMPLE_MS;
+            if (++calChk >= 4) { calErr = ""; calSetPhase(CAL_REF); }
+        }
+        if (calPhase == CAL_TARING && now - calPhaseAt > CAL_STEP_TIMEOUT_MS) calFail("read");
+        break;
+
+    case CAL_PLACE:
+        // Steady = last 6 samples within 1 g. CALIBRATE arms only then, so the 30-sample average
+        // can never start on a still-swinging pan.
+        if ((int32_t)(now - calNextAt) >= 0 && calReadRaw(r)) {
+            calNextAt = now + CAL_SAMPLE_MS;
+            float g = (float)(r - calOffset) / dispFactor;
+            calRing[calRingI] = g; calRingI = (calRingI + 1) % 6; if (calRingN < 6) calRingN++;
+            float mn = calRing[0], mx = calRing[0];
+            for (int i = 1; i < calRingN; i++) { if (calRing[i] < mn) mn = calRing[i]; if (calRing[i] > mx) mx = calRing[i]; }
+            calStable = (calRingN == 6) && (mx - mn < CAL_STABLE_BAND_G) && (fabsf(g) > 1.0f);
+        }
+        break;
+
+    case CAL_MEASURING:
+        if (now - calPhaseAt < CAL_SETTLE_MS) break;
+        if (calReadRaw(r)) { calSum += r; calN++; }
+        if (calN >= 30) {
+            float raw = (float)((double)calSum / calN - (double)calOffset);
+            float f = fabsf(raw / calRef);
+            Serial.printf("[CAL] raw=%.1f ref=%.0f factor=%.4f\n", raw, calRef, f);
+            if (f < CAL_MIN_FACTOR) { calFail("read"); break; }
+            calFactor = f;
+            scale.set_scale(calFactor);
+            saveCalFactor(calFactor);
+            saveTare();
+            calErr = "";
+            calSetPhase(CAL_SAVED);
+        } else if (now - calPhaseAt > CAL_STEP_TIMEOUT_MS) calFail("read");
+        break;
+
+    case CAL_SAVED:
+        if (now - calPhaseAt >= CAL_SAVED_SHOW_MS) calEnd(true);
+        break;
+
+    case CAL_ERROR:
+        if (now - calPhaseAt >= CAL_ERROR_SHOW_MS) calEnd(false);
+        break;
+    }
+
+    if ((calPhase == CAL_TARE_WAIT || calPhase == CAL_REF || calPhase == CAL_PLACE)
+        && now - calLastCmdMs > CAL_IDLE_TIMEOUT_MS) {
+        Serial.println("[CAL] idle timeout");
+        calEnd(false);
+    }
 }
 
 static void updateScale() {
@@ -362,8 +543,29 @@ static String buildRfFrame(bool full, RfState &st) {
     String out; serializeJson(d, out); return out;
 }
 
+// Calibration wizard state, its own small frame like the RFID one. cal = CalPhase, cal_ok = the
+// reading is steady (CALIBRATE may be pressed), cal_err = "" | zero | read | ref, cal_done = the
+// scale has been calibrated at least once (the app's first-calibration reminder keys off it).
+struct CalState { int phase = -1, ref = -1, done = -1; bool ok = false; String err = "\x01"; float cf = -1; };
+
+static String buildCalFrame(bool full, CalState &st) {
+    StaticJsonDocument<192> d;
+    int ph = calPhase, ref = (int)calRef, done = calDone ? 1 : 0;
+    bool ok = calStable;
+    String err = calErr;
+    putField<int>   (d, "cal",         ph,        st.phase, full);
+    putField<bool>  (d, "cal_ok",      ok,        st.ok,    full);
+    putField<int>   (d, "cal_ref",     ref,       st.ref,   full);
+    putField<String>(d, "cal_err",     err,       st.err,   full);
+    putField<int>   (d, "cal_done",    done,      st.done,  full);
+    putField<float> (d, "calibrationFactor", calFactor, st.cf, full);
+    if (d.size() == 0) return "";
+    String out; serializeJson(d, out); return out;
+}
+
 static FrameState wsState, bleState;
 static RfState wsRf, bleRf;
+static CalState wsCal, bleCal;
 
 // ---- BLE (NimBLE) ----------------------------------------------------------
 // Same JSON as the WebSocket, over one notify characteristic. Commands come back
@@ -420,6 +622,15 @@ public:
             else if (!strcmp(cmd, "calibrate")) {
                 float g = d["grams"] | 0.0f;
                 if (g > 0) pendCalGrams = g;
+            } else if (!strcmp(cmd, "cal_start"))   { calCommand(CC_START);
+            } else if (!strcmp(cmd, "cal_tare"))    { calCommand(CC_TARE);
+            } else if (!strcmp(cmd, "cal_ref"))     { calCommand(CC_REF, d["grams"] | 0.0f);
+            } else if (!strcmp(cmd, "cal_measure")) { calCommand(CC_MEASURE);
+            } else if (!strcmp(cmd, "cal_back"))    { calCommand(CC_BACK);
+            } else if (!strcmp(cmd, "cal_cancel"))  { calCommand(CC_CANCEL);
+            } else if (!strcmp(cmd, "cal_factor")) {
+                float f = d["value"] | 0.0f;
+                if (f > 0) pendCalFactor = f;       // manual entry, same path as Studio's calibration_set
             } else if (!strcmp(cmd, "wifi_scan")) {
                 pendScan = true;
             } else if (!strcmp(cmd, "rfid_test")) {
@@ -522,7 +733,7 @@ static void enqueueAvatar(const String &url) {
 
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
-        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState();
+        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState();
         for (int i = 0; i < bleQueued; i++) bleQueue[i] = "";
         bleQueued = 0;
         return;
@@ -531,6 +742,7 @@ static void pumpBle(bool periodicFull) {
     bleNeedFull = false;
     bleEnqueue(buildFrame(full, bleState, true));
     bleEnqueue(buildRfFrame(full, bleRf));
+    bleEnqueue(buildCalFrame(full, bleCal));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -733,11 +945,26 @@ static void setupRoutes() {
             float f = j["factor"] | 0.0f;
             if (f == 0.0f) f = j["value"] | 0.0f;
             if (f == 0.0f) { r->send(400, "application/json", "{\"ok\":false}"); return; }
-            calFactor = f; scale.set_scale(f);
-            prefs.begin("scale", false); prefs.putFloat("cal", f); prefs.end();
+            if (f < 0.0f) { r->send(400, "application/json", "{\"ok\":false}"); return; }
+            pendCalFactor = f;     // applied in loop(), never while the wizard is running
             r->send(200, "application/json", "{\"ok\":true}");
         });
     server.addHandler(cal);
+
+    // Calibration wizard over Wi-Fi: {"cmd":"cal_start|cal_tare|cal_ref|cal_measure|cal_back|cal_cancel","grams":500}
+    auto *calw = new AsyncCallbackJsonWebHandler("/api/cal",
+        [](AsyncWebServerRequest *r, JsonVariant &j) {
+            const char *c = j["cmd"] | "";
+            if      (!strcmp(c, "cal_start"))   calCommand(CC_START);
+            else if (!strcmp(c, "cal_tare"))    calCommand(CC_TARE);
+            else if (!strcmp(c, "cal_ref"))     calCommand(CC_REF, j["grams"] | 0.0f);
+            else if (!strcmp(c, "cal_measure")) calCommand(CC_MEASURE);
+            else if (!strcmp(c, "cal_back"))    calCommand(CC_BACK);
+            else if (!strcmp(c, "cal_cancel"))  calCommand(CC_CANCEL);
+            else { r->send(400, "application/json", "{\"ok\":false}"); return; }
+            r->send(200, "application/json", "{\"ok\":true}");
+        });
+    server.addHandler(calw);
 
     // Put a known weight on the platform, then POST {"knownGrams":500}.
     auto *cal2 = new AsyncCallbackJsonWebHandler("/api/calibrate",
@@ -764,6 +991,7 @@ void setup() {
     rfPow        = prefs.getUChar("rfpow", rfPow);
     if (rfPow >= RF_LEVEL_COUNT) rfPow = RF_LEVEL_COUNT - 1;
     long tare    = prefs.getLong("tare", 0);
+    calDone      = prefs.isKey("cal");
     prefs.end();
 
     scale.begin(HX711_DOUT, HX711_SCK);
@@ -814,15 +1042,17 @@ void loop() {
     }
     static uint32_t lastWs = 0, lastFull = 0;
 
-    if (pendTare)           { pendTare = false; doTare(); }
+    calTick();
+    // While the wizard runs it owns the load cell: tare / factor changes wait until it is done.
+    if (pendTare)           { pendTare = false; if (!calActive()) doTare(); }
     if (pendWfStop)         { pendWfStop = false; wfStop(); }
-    if (pendCalFactor != 0) {
+    if (pendCalFactor != 0 && !calActive()) {
         calFactor = pendCalFactor; pendCalFactor = 0;
         scale.set_scale(calFactor);
-        prefs.begin("scale", false); prefs.putFloat("cal", calFactor); prefs.end();
+        saveCalFactor(calFactor);
     }
     if (pendRestartAt && (int32_t)(millis() - pendRestartAt) >= 0) ESP.restart();
-    if (pendCalGrams > 0)   { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
+    if (pendCalGrams > 0 && !calActive()) { float g = pendCalGrams; pendCalGrams = 0; doCalibrate(g); }
 
     if (digitalRead(BOOT_BTN) == LOW) bootBtnMs = millis() ? millis() : 1;
     if (pendRfPow >= 0) {
@@ -865,11 +1095,11 @@ void loop() {
     }
 
     uint32_t t0 = millis();
-    updateScale();
+    if (!calActive()) updateScale();    // the wizard reads the HX711 itself
     uint32_t t1 = millis();
     pollRfid();
     uint32_t t2 = millis();
-    updateStatus();
+    if (!calActive()) updateStatus();   // and no weigh session runs underneath it
     uint32_t t3 = millis();
     if (t3 - t0 > 300) Serial.printf("[LOOP] scale=%u rfid=%u status=%u ms\n", (unsigned)(t1 - t0), (unsigned)(t2 - t1), (unsigned)(t3 - t2));
 
@@ -888,9 +1118,12 @@ void loop() {
             if (f.length() && ws.availableForWriteAll()) ws.textAll(f);
             String rf = buildRfFrame(full, wsRf);
             if (rf.length() && ws.availableForWriteAll()) ws.textAll(rf);
+            String cf = buildCalFrame(full, wsCal);
+            if (cf.length() && ws.availableForWriteAll()) ws.textAll(cf);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
             wsRf = RfState();
+            wsCal = CalState();
         }
         ws.cleanupClients();
         pumpBle(full);
