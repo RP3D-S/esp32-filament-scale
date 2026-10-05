@@ -74,24 +74,44 @@ counts/g when the stored factor is below 50, because this scale held 0.072 befor
 the zero check impossible to pass. The cloud account used here is a test account, so the inventory values written
 during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do not matter.
 
-1. **Latency fix just made, not yet re-measured on the phone.** The PN532 library's `readBytes()` waited the
-   serial timeout (1000 ms) on every "no tag" reply, blocking the main loop to 1 pass/s (weight took ~4 s to
-   appear and >15 s to return to zero). Fixed with `Serial2.setTimeout(30)`; loop stalls are gone on the bench.
-   Re-test the app unplugged from USB. Keep-alive frames (2 s) and stale-link reconnect were added too.
-2. Heap is tight on the classic ESP32 (largest free block ~20-35 KB during TLS). AsyncTCP stack was cut to 7 KB
-   and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS session.
-3. BLE link occasionally drops (supervision timeout, status 8) when Wi-Fi/TLS is busy; the app reconnects in ~3 s.
-4. No OTA (single 3.9 MB app partition). Flash by USB.
-5. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, OTA, web UI from `data/www`,
+1. **Main-loop latency: two causes fixed, extended real-world use not yet measured.**
+   (a) The PN532 library's `readBytes()` waited the serial timeout (1000 ms) on every "no tag" reply, limiting the
+   loop to 1 pass/s (weight took ~4 s to appear and >15 s to return to zero): fixed with `Serial2.setTimeout(30)`.
+   (b) `scale.tare(10)` blocked `loop()` for ~900 ms on every tare (the HX711 gives ~10 samples/s, and the auto-tare
+   fires constantly): found with the per-section timing (`[LOOP] slow pass ...: cmds=850`), fixed by making the tare a
+   job fed one sample per pass by `updateScale()`. After the fix, 5 tares in a row and a tare with a load on the
+   platform (217 -> 0 in 0.8 s) gave no stall. Rule that came out of it: nothing in `loop()` may wait for the HX711;
+   `get_value(n)`, `get_units(n)`, `tare(n)` and `wait_ready_timeout()` all block for n/10 s. The only ones left are
+   `doCalibrate()` (the old one-shot `/api/calibrate`, not used by the wizard) and the tare in `setup()`.
+   Still to do: use the scale for a while with the app unplugged from USB and check that no `[LOOP]` line appears.
+   The weight the owner puts on the platform reads 217 g, the same before and after the change; if it should be
+   250 g the factor deserves another look.
+2. **The phone's Wi-Fi link to the scale is flaky, the app lives mostly on BLE.** From the phone: 24 `wifi link down:
+   failed to connect to /<scale> (port 80) ... after 4000ms` in 150 s, only 3 connections. From the PC the same
+   scale answers fine (ping 11-53 ms, HTTP 100-250 ms, occasional ~1 s spike). Not caused by the stalls (it kept
+   happening with none). Not investigated yet: look at the phone's side (Wi-Fi power save, AP/band isolation) and at
+   how many connections AsyncTCP accepts with ~30 KB of free heap.
+3. Heap is tight on the classic ESP32 (largest free block ~17-37 KB, lower the longer it has been up). AsyncTCP stack
+   was cut to 7 KB and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS session.
+4. BLE link occasionally drops (supervision timeout, status 8; the app logs `ble link stale ... -> reconnect`) when
+   Wi-Fi/TLS is busy; the app reconnects in ~3 s.
+5. No OTA (single 3.9 MB app partition). Flash by USB.
+6. Not ported from the original: second NFC reader, servo, battery/PMIC, sound, OTA, web UI from `data/www`,
    rack/position editing, language sync with the account.
-6. The app prints a `[LOOP] stall` / `FilScale` debug log; harmless, remove when done diagnosing.
+7. Debug logging to remove when done diagnosing: the firmware's `[LOOP]` timing (keep it cheap, it only prints on slow
+   passes) and the app's `FilScale` log. The app's `ble frame gap` line is noise: it fires above 1.5 s, but the scale
+   only sends a keep-alive every 2 s when nothing changes, so ~2 s gaps are normal.
 
 ## Handy
 - Wireless adb (no cable): `adb tcpip 5555`, `adb connect <phone-ip>:5555`.
 - Phone mirror on the PC: scrcpy (`scrcpy --stay-awake`), set `ADB` to the SDK's adb first.
 - `pio run -e esp32dev_hsu_debug` adds a byte-level PN532 trace.
-- ESP32 serial lines to look for: `[WF]` workflow, `[FB]` cloud (`PATCH inventory ... HTTP 200`), `[RFID]`, `[LOOP]`,
-  `[WIFI]` scan, `[CAL]` wizard (zero checks, `raw= ref= factor=`).
+- ESP32 serial lines to look for: `[WF]` workflow, `[FB]` cloud (`PATCH inventory ... HTTP 200`), `[RFID]`,
+  `[WIFI]` scan, `[CAL]` wizard (zero checks, `raw= ref= factor=`), and `[LOOP]`: `stall N ms` = gap between two
+  passes, `slow pass N ms: <section>=ms ...` = which section of `loop()` took the time (cmds, wifi, fbpub, scale,
+  rfid, status, ws, wsclean, ble, delay), `outside loop() N ms` = time in the scheduler, not in our code.
+- To find what blocks the loop: leave a timestamped serial logger running (a PowerShell `SerialPort` loop appending
+  to a file) while using the scale, then grep `LOOP`. It held the COM port, so stop it before flashing.
 - The phone holds the scale's BLE link, which hides it from other BLE clients: close the app before testing from a PC.
   A PC test can drive the wizard with Python + `bleak` (write JSON commands to characteristic `6e5f0003-b5a3-f393-e0a9-e50e24dcca9e`,
   frames arrive as notifications on `...0002...`).
