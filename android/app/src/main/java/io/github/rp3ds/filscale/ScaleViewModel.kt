@@ -96,6 +96,19 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         if (!s.wifiLinked && s.host.isNotBlank()) { reconnectJob?.cancel(); connectWifi() }
         if (!s.bleLinked) ble.start()
     }
+    /**
+     * The app left the foreground (screen off, another app). Android's Doze cuts the network of background
+     * apps, so every Wi-Fi attempt would just time out (and leave a dead socket on the scale). Drop the
+     * Wi-Fi link and stop retrying; Bluetooth keeps the scale connected, and [onForeground] brings Wi-Fi back.
+     */
+    fun onBackground() {
+        Log.d("FilScale", "background: dropping the wifi link, ble stays")
+        wantWifi = false
+        reconnectJob?.cancel()
+        client.disconnect()
+        _state.update { it.copy(wifiLinked = false) }
+    }
+
     private var wantWifi = false
 
     init {

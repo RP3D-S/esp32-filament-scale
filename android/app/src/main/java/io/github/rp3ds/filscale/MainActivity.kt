@@ -73,6 +73,11 @@ class MainActivity : ComponentActivity() {
         vm.onForeground()
     }
 
+    override fun onStop() {
+        super.onStop()
+        vm.onBackground()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
