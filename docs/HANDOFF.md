@@ -54,15 +54,24 @@ One PN532, no servo, no screen, no battery.
   `cal_ref {grams}`, `cal_measure`, `cal_back`, `cal_cancel`, `cal_factor {value}` over BLE, or `POST /api/cal`.
   The scale reports `cal` (phase 0 off, 1 tare, 2 taring, 3 reference, 4 place, 5 measuring, 6 saved, 7 error),
   `cal_ok` (steady), `cal_ref`, `cal_err` (zero / read / ref), `cal_done` (calibrated at least once; NVS key `cal`).
-  The app screens are `CalibrationWizard.kt`; Settings also has the factor and manual factor entry, and a
+  The app screens are `CalibrationWizard.kt`; Settings also has manual factor entry, and a
   first-calibration side panel (2 s after connecting, then every 5 min, never during a weighing).
   Tested on hardware: every step, rejection of 100 g, back/cancel, and a full run with a 250 g weight.
+- **Settings menu in the app** (`SettingsScreen.kt`) laid out like the original's list: Scale, WiFi, Account,
+  Calibration Wizard (shows the factor), Manual calibration, Language, RFID, Firmware (read-only, no OTA), Restart
+  (amber) and Factory reset (red, last). Each row shows its current value. Left out because the hardware is absent:
+  volume, screen, power-off, live view. The "Scale" row holds the app-only connection tools (switch/forget scale,
+  search, manual IP). Icons are drawn with the same primitives as the original (rings, bars, pill outlines).
+- Restart and factory reset go over the **encrypted** BLE characteristic (`restart`, `factory_reset`). The app
+  asks for a confirmation; the factory reset button only fires after a 3 s press-and-hold. It wipes Wi-Fi, account
+  and calibration (NVS namespace `scale`), and then the scale restarts. The firmware no longer asks for BOOT.
+- Wi-Fi dialog: show/hide password, and it closes by itself once the scale is connected to the chosen network.
 
 ## Open items (in priority order)
 1. **Verify the calibration with a second weight.** First real factor is **943.37** (250 g, raw 235 842 counts); the
    display then read 250 g. It is higher than the 400-460 typical of this load cell/HX711 pair, so put a different
-   known weight on the platform and confirm it reads right before trusting it. The app's wizard screens were built
-   and installed but not yet confirmed visually on the phone (the firmware side was driven over BLE from a PC).
+   known weight on the platform and confirm it reads right before trusting it. The app's wizard screens were checked
+   on the phone and look right (the firmware side was also driven over BLE from a PC).
    The wizard's "within 1 g" limits fall back to 400 counts/g when the stored factor is below 50: this scale held
    0.072 before the first calibration, which made the zero check impossible to pass.
 2. **Inventory values overwritten during testing.** The spool pair `1D6EAB64121080` / `1D77F85F121080` now has
