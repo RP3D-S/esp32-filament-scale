@@ -207,6 +207,7 @@ static volatile float pendCalGrams = 0;
 static volatile bool  pendWifi = false, pendScan = false;
 static volatile bool  pendBuz = false, pendBuzTest = false;   // buzzer settings / test, applied in loop()
 static volatile int   pendBuzPin = -2, pendBuzLevel = -1;
+static volatile bool  pendStaticIp = false;               // new fixed-IP settings to save and apply, in loop()
 static String         pendSsid, pendPass;
 static uint32_t       bootBtnMs = 0;          // last time BOOT was seen pressed
 static uint32_t       wifiAttemptUntil = 0;   // >0 while a provisioning attempt runs
@@ -263,6 +264,49 @@ static void doFactoryReset() {
     fbLogout();
     WiFi.disconnect(true, true);
     pendRestartAt = millis() + 1500;
+}
+
+// ---- Fixed IP address -------------------------------------------------------
+// Some routers never answer the scale's DHCP request (it associates and then waits for an address forever),
+// so the address can be set by hand from the app. Kept in NVS; `on` false means DHCP, the default.
+struct StaticIp { bool on = false; IPAddress ip, gw, mask, dns; };
+static StaticIp gStaticIp;
+
+static void loadStaticIp() {
+    prefs.begin("scale", true);
+    gStaticIp.on = prefs.getBool("sip_on", false);
+    gStaticIp.ip = IPAddress(prefs.getUInt("sip_ip", 0));
+    gStaticIp.gw = IPAddress(prefs.getUInt("sip_gw", 0));
+    gStaticIp.mask = IPAddress(prefs.getUInt("sip_mask", 0));
+    gStaticIp.dns = IPAddress(prefs.getUInt("sip_dns", 0));
+    prefs.end();
+    if (gStaticIp.on && (uint32_t)gStaticIp.ip == 0) gStaticIp.on = false;     // never trust a half-written record
+}
+
+static void saveStaticIp() {
+    prefs.begin("scale", false);
+    prefs.putBool("sip_on", gStaticIp.on);
+    prefs.putUInt("sip_ip", (uint32_t)gStaticIp.ip);
+    prefs.putUInt("sip_gw", (uint32_t)gStaticIp.gw);
+    prefs.putUInt("sip_mask", (uint32_t)gStaticIp.mask);
+    prefs.putUInt("sip_dns", (uint32_t)gStaticIp.dns);
+    prefs.end();
+}
+
+/** Puts the settings into the Wi-Fi stack: the fixed address, or DHCP again when `on` is false. */
+static void applyStaticIp() {
+    if (gStaticIp.on) WiFi.config(gStaticIp.ip, gStaticIp.gw, gStaticIp.mask, gStaticIp.dns);
+    else WiFi.config(IPAddress((uint32_t)0), IPAddress((uint32_t)0), IPAddress((uint32_t)0));
+}
+
+/** Sane address set: a contiguous mask no longer than /30, the gateway on the same subnet, a usable host address. */
+static bool staticIpValid(const IPAddress &ip, const IPAddress &gw, const IPAddress &mask) {
+    uint32_t m = ntohl((uint32_t)mask), inv = ~m;
+    if (m == 0 || (inv & (inv + 1)) != 0 || inv < 3) return false;              // contiguous ones, at least 4 addresses
+    if (((uint32_t)ip & (uint32_t)mask) != ((uint32_t)gw & (uint32_t)mask)) return false;
+    if (ip == gw) return false;
+    uint32_t host = ntohl((uint32_t)ip) & inv;
+    return host != 0 && host != inv;                                              // not the network or broadcast address
 }
 
 // ---- Calibration wizard ---------------------------------------------------
@@ -642,6 +686,24 @@ static String buildSndFrame(bool full, SndState &st) {
 
 static SndState wsSnd, bleSnd;
 
+// Fixed-IP settings for the app: sip (0/1) and the four addresses as text.
+struct IpState { int on = -9; String ip = "\x01", gw = "\x01", mask = "\x01", dns = "\x01"; };
+
+static String buildIpFrame(bool full, IpState &st) {
+    StaticJsonDocument<192> d;
+    int on = gStaticIp.on ? 1 : 0;
+    String ip = gStaticIp.ip.toString(), gw = gStaticIp.gw.toString(), mask = gStaticIp.mask.toString(), dns = gStaticIp.dns.toString();
+    putField<int>(d, "sip", on, st.on, full);
+    putField<String>(d, "sip_ip", ip, st.ip, full);
+    putField<String>(d, "sip_gw", gw, st.gw, full);
+    putField<String>(d, "sip_mask", mask, st.mask, full);
+    putField<String>(d, "sip_dns", dns, st.dns, full);
+    if (d.size() == 0) return "";
+    String out; serializeJson(d, out); return out;
+}
+
+static IpState wsIp, bleIp;
+
 // ---- BLE (NimBLE) ----------------------------------------------------------
 // Same JSON as the WebSocket, over one notify characteristic. Commands come back
 // as JSON on a write characteristic: {"cmd":"tare"} / {"cmd":"calibrate","grams":500}.
@@ -747,6 +809,20 @@ public:
             if (*email && *pass) fbLogin(email, pass);
         } else if (!strcmp(cmd, "fb_logout")) {
             fbLogout();
+        } else if (!strcmp(cmd, "ip_set")) {
+            // Same rule as changing the network: with Wi-Fi up it needs BOOT pressed in the last 30 s.
+            bool allowed = WiFi.status() != WL_CONNECTED || (bootBtnMs && millis() - bootBtnMs < 30000);
+            if (!allowed) { bleSend("{\"ip_err\":\"boot\"}"); return; }
+            StaticIp n;
+            n.on = d["en"] | false;
+            if (n.on) {
+                const char *dn = d["dns"] | "";
+                if (!n.ip.fromString(d["ip"] | "") || !n.gw.fromString(d["gw"] | "") || !n.mask.fromString(d["mask"] | "")
+                    || !staticIpValid(n.ip, n.gw, n.mask)) { bleSend("{\"ip_err\":\"addr\"}"); return; }
+                if (!*dn || !n.dns.fromString(dn)) n.dns = n.gw;
+            }
+            gStaticIp = n;
+            pendStaticIp = true;
         } else if (!strcmp(cmd, "restart")) {
             pendRestartAt = millis() + 1500;
         } else if (!strcmp(cmd, "factory_reset")) {
@@ -827,7 +903,7 @@ static void enqueueAvatar(const String &url) {
 
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
-        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState(); bleSnd = SndState();
+        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState(); bleSnd = SndState(); bleIp = IpState();
         for (int i = 0; i < bleQueued; i++) bleQueue[i] = "";
         bleQueued = 0;
         return;
@@ -839,6 +915,7 @@ static void pumpBle(bool periodicFull) {
     bleEnqueue(buildCalFrame(full, bleCal));
     bleEnqueue(buildOtaFrame(full, bleOta));
     bleEnqueue(buildSndFrame(full, bleSnd));
+    bleEnqueue(buildIpFrame(full, bleIp));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -1167,6 +1244,12 @@ void setup() {
     WiFi.setHostname(n);
     WiFi.setAutoReconnect(true);
     WiFi.persistent(true);
+    loadStaticIp();
+    if (gStaticIp.on) {
+        applyStaticIp();
+        Serial.printf("[WIFI] fixed IP %s, gateway %s, mask %s, dns %s\n", gStaticIp.ip.toString().c_str(), gStaticIp.gw.toString().c_str(),
+                      gStaticIp.mask.toString().c_str(), gStaticIp.dns.toString().c_str());
+    }
     // Say what the Wi-Fi is doing: without this a failed connection is silent. A disconnect reason of
     // NO_AP_FOUND means the SSID is not on 2.4 GHz range, AUTH_FAIL / 4WAY_HANDSHAKE_TIMEOUT a wrong
     // password or an unsupported security mode (the ESP32 does 2.4 GHz only, WPA3-only will not work).
@@ -1246,6 +1329,14 @@ void loop() {
         if (!buzzerConfigure(pendBuzPin, pendBuzLevel)) bleSend("{\"bz_err\":\"pin\"}");
     }
     if (pendBuzTest) { pendBuzTest = false; buzzerSuccess(); }
+    if (pendStaticIp) {
+        pendStaticIp = false;
+        saveStaticIp();
+        applyStaticIp();
+        Serial.printf("[WIFI] %s\n", gStaticIp.on ? "fixed IP saved, reconnecting" : "back to DHCP, reconnecting");
+        WiFi.disconnect(false, false);
+        WiFi.begin();
+    }
     calTick();
     // While the wizard runs it owns the load cell: tare / factor changes wait until it is done.
     if (pendTare)           { pendTare = false; if (!calActive()) doTare(); }
@@ -1338,12 +1429,15 @@ void loop() {
             if (of.length() && ws.availableForWriteAll()) ws.textAll(of);
             String sf = buildSndFrame(full, wsSnd);
             if (sf.length() && ws.availableForWriteAll()) ws.textAll(sf);
+            String ipf = buildIpFrame(full, wsIp);
+            if (ipf.length() && ws.availableForWriteAll()) ws.textAll(ipf);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
             wsRf = RfState();
             wsCal = CalState();
             wsOta = OtaState();
             wsSnd = SndState();
+            wsIp = IpState();
         }
         lap(6);
         // At most 2 WebSocket clients, oldest closed first. A phone that went to sleep (Doze) leaves a dead
