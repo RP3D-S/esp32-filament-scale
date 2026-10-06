@@ -69,6 +69,8 @@ data class ScaleState(
     val sipMask: String = "",
     val sipDns: String = "",
     val ipErr: String = "",
+    /** The network saved on the scale (what it will try to join), empty when none: reported as wsv. */
+    val wifiSaved: String = "",
     val searching: Boolean = false,
     /** BLE: the chosen scale (name), none chosen yet, nearby scales while picking, permission granted */
     val scaleName: String = "",
@@ -131,5 +133,6 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     sipGw = if (j.has("sip_gw")) j.optString("sip_gw").takeUnless { it == "0.0.0.0" } ?: "" else sipGw,
     sipMask = if (j.has("sip_mask")) j.optString("sip_mask").takeUnless { it == "0.0.0.0" } ?: "" else sipMask,
     sipDns = if (j.has("sip_dns")) j.optString("sip_dns").takeUnless { it == "0.0.0.0" } ?: "" else sipDns,
+    wifiSaved = if (j.has("wsv")) j.optString("wsv") else wifiSaved,
     ipErr = if (j.has("ip_err")) j.optString("ip_err") else if (j.has("sip")) "" else ipErr,
 )

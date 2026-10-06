@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val fwUi by vm.fw.collectAsStateWithLifecycle()
                     val snd = remember { SoundActions(vm::buzzerSet, vm::buzzerTest) }
-                    val net = remember { NetActions(vm::applyFixedIp) }
+                    val net = remember { NetActions(vm::applyFixedIp, vm::forgetWifi) }
                     val fw = FwActions(fwUi, vm::fwCheck, vm::fwUpdate, { pickFirmware.launch(arrayOf("*/*")) }, vm::fwReset)
                     ScaleScreen(
                         s = s,
@@ -300,7 +300,7 @@ private fun SettingsDialog(
     if (showSound) SoundDialog(s, snd) { showSound = false }
     if (showScale) ScaleDialog(s, { showScale = false }, onSearch, { showHost = true }, onPickScale, onForget)
     if (showLang) LanguageDialog { showLang = false }
-    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi, net.applyFixed)
+    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi, net.applyFixed, net.forgetWifi)
     if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
     if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
@@ -423,7 +423,13 @@ private fun WifiDialog(
     onScan: () -> Unit,
     onOk: (String, String) -> Unit,
     onFixedIp: (FixedIp) -> Unit,
+    onForget: () -> Unit,
 ) {
+    var confirmForget by remember { mutableStateOf(false) }
+    var forgot by remember { mutableStateOf(false) }
+    // After forgetting, list the networks around so another one can be picked; the scale needs a moment first
+    // (BLE takes one write at a time).
+    LaunchedEffect(forgot) { if (forgot) { delay(1_500); onScan(); forgot = false } }
     val form = remember { FixedIpForm(s.sipOn, s.sipIp, s.sipGw, s.sipMask, s.sipDns) }
     var ssid by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
@@ -442,6 +448,15 @@ private fun WifiDialog(
         title = { Text(stringResource(R.string.wifi_title)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val saved = s.wifiSaved.ifBlank { if (s.wifiState == 2) s.ssid else "" }
+                if (saved.isNotBlank()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(stringResource(R.string.wifi_saved, saved), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { confirmForget = true }, enabled = s.bleLinked) {
+                            Text(stringResource(R.string.wifi_forget), color = Color(0xFFE24B4A))
+                        }
+                    }
+                }
                 Text(stringResource(R.string.wifi_networks), fontSize = 13.sp)
                 if (s.networks.isEmpty()) Text(stringResource(R.string.scanning), fontSize = 13.sp, color = Color(0xFF8A93A6))
                 s.networks.forEach { n ->
@@ -494,6 +509,20 @@ private fun WifiDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
+
+    if (confirmForget) {
+        val name = s.wifiSaved.ifBlank { s.ssid }
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            text = { Text(stringResource(R.string.wifi_forget_q, name)) },
+            confirmButton = {
+                TextButton(onClick = { confirmForget = false; onForget(); forgot = true }) {
+                    Text(stringResource(R.string.wifi_forget), color = Color(0xFFE24B4A))
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmForget = false }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
 }
 
 /** Signs the scale in to the TigerTag cloud. The password is sent once over the encrypted link and never stored. */

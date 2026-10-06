@@ -272,6 +272,16 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Erases the Wi-Fi network saved on the scale so it can be joined to another one. With Wi-Fi up the scale
+     * asks for BOOT to be pressed first, like for any change of network. The fixed IP setting is not touched.
+     */
+    fun forgetWifi() {
+        _state.update { it.copy(wifiNeedsBoot = false) }
+        lastSecureWriteMs = SystemClock.elapsedRealtime()
+        if (!ble.sendSecure("""{"cmd":"wifi_forget"}""")) _state.update { it.copy(message = str(R.string.msg_bt_first)) }
+    }
+
+    /**
      * Fixed address for the scale's Wi-Fi (or DHCP again when [f].on is false). The scale applies it and reconnects;
      * with Wi-Fi already up it asks for BOOT to be pressed first, like any change of network.
      */

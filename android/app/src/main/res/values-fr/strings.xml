@@ -157,4 +157,8 @@
     <string name="ip_invalid">Vérifiez les adresses : l\'IP et la passerelle doivent être sur le même réseau et le masque valide.</string>
     <string name="ip_apply">Appliquer seulement l\'adresse</string>
     <string name="ip_current">Adresse fixe utilisée : %1$s</string>
+    <!-- Forget the saved Wi-Fi network -->
+    <string name="wifi_saved">Réseau enregistré : %1$s</string>
+    <string name="wifi_forget">Oublier</string>
+    <string name="wifi_forget_q">Oublier %1$s ? La balance se déconnectera et vous pourrez la connecter à un autre réseau.</string>
 </resources>

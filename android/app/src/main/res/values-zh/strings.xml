@@ -157,4 +157,8 @@
     <string name="ip_invalid">请检查地址：IP 与网关须在同一网络，子网掩码须有效。</string>
     <string name="ip_apply">仅应用地址</string>
     <string name="ip_current">正在使用固定地址：%1$s</string>
+    <!-- Forget the saved Wi-Fi network -->
+    <string name="wifi_saved">已保存的网络：%1$s</string>
+    <string name="wifi_forget">忘记</string>
+    <string name="wifi_forget_q">忘记 %1$s？秤将断开连接，之后可连接到其他网络。</string>
 </resources>

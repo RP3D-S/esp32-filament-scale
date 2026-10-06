@@ -29,7 +29,7 @@ import java.net.Inet4Address
 data class FixedIp(val on: Boolean, val ip: String, val gw: String, val mask: String, val dns: String)
 
 /** What the Wi-Fi dialog can ask of the scale besides the credentials. */
-data class NetActions(val applyFixed: (FixedIp) -> Unit)
+data class NetActions(val applyFixed: (FixedIp) -> Unit, val forgetWifi: () -> Unit)
 
 /** The addresses of the phone's own Wi-Fi network, to suggest values that fit the same router. */
 data class PhoneNet(val ip: String, val gateway: String, val mask: String, val dns: String)

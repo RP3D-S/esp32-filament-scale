@@ -157,4 +157,8 @@
     <string name="ip_invalid">Controlla gli indirizzi: IP e gateway devono essere nella stessa rete e la maschera valida.</string>
     <string name="ip_apply">Applica solo l\'indirizzo</string>
     <string name="ip_current">Indirizzo fisso in uso: %1$s</string>
+    <!-- Forget the saved Wi-Fi network -->
+    <string name="wifi_saved">Rete salvata: %1$s</string>
+    <string name="wifi_forget">Dimentica</string>
+    <string name="wifi_forget_q">Dimenticare %1$s? La bilancia si scollegherà e potrai collegarla a un\'altra rete.</string>
 </resources>

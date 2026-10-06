@@ -157,4 +157,8 @@
     <string name="ip_invalid">Sprawdź adresy: IP i brama muszą być w tej samej sieci, a maska poprawna.</string>
     <string name="ip_apply">Zastosuj tylko adres</string>
     <string name="ip_current">Używany stały adres: %1$s</string>
+    <!-- Forget the saved Wi-Fi network -->
+    <string name="wifi_saved">Zapisana sieć: %1$s</string>
+    <string name="wifi_forget">Zapomnij</string>
+    <string name="wifi_forget_q">Zapomnieć %1$s? Waga się rozłączy i będzie można połączyć ją z inną siecią.</string>
 </resources>

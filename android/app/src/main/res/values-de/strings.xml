@@ -157,4 +157,8 @@
     <string name="ip_invalid">Adressen prüfen: IP und Gateway müssen im selben Netz liegen und die Maske gültig sein.</string>
     <string name="ip_apply">Nur Adresse anwenden</string>
     <string name="ip_current">Feste Adresse aktiv: %1$s</string>
+    <!-- Forget the saved Wi-Fi network -->
+    <string name="wifi_saved">Gespeichertes Netzwerk: %1$s</string>
+    <string name="wifi_forget">Entfernen</string>
+    <string name="wifi_forget_q">%1$s entfernen? Die Waage trennt sich, und du kannst sie mit einem anderen Netzwerk verbinden.</string>
 </resources>

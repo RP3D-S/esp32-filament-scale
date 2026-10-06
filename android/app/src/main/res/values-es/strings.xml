@@ -157,4 +157,8 @@
     <string name="ip_invalid">Revisa las direcciones: la IP y la puerta de enlace deben estar en la misma red y la máscara ser válida.</string>
     <string name="ip_apply">Aplicar solo la dirección</string>
     <string name="ip_current">Dirección fija en uso: %1$s</string>
+    <!-- Forget the saved Wi-Fi network -->
+    <string name="wifi_saved">Red guardada: %1$s</string>
+    <string name="wifi_forget">Olvidar</string>
+    <string name="wifi_forget_q">¿Olvidar %1$s? La báscula se desconectará y podrás conectarla a otra red.</string>
 </resources>
