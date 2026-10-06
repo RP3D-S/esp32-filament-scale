@@ -22,6 +22,11 @@ TCA9554 expander. Power is plain USB 5 V.
 | PN532 RX (<- PN532 TXD) | 16 (Serial2) |
 | PN532 TX (-> PN532 RXD) | 17 (Serial2) |
 | PN532 RSTPDN | 27 |
+| Buzzer (optional, passive) | 26 by default; configurable (`-DBUZZER_PIN`, or Settings > Sound in the app) |
+
+The buzzer pin may be any of 4, 13, 14, 18, 19, 21, 22, 23, 25 or 26: free outputs that are not strapping, flash,
+USB-serial, PN532, HX711 or input-only pins. Wire the signal to the GPIO and the other leg to GND; a bare buzzer
+drawing more than ~10 mA needs a transistor.
 
 PN532 modules run on 3.3 V or 5 V per the module; HSU logic is 3.3 V-tolerant on
 the V3 board.
