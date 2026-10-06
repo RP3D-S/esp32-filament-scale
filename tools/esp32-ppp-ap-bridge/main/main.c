@@ -15,6 +15,7 @@
 #include "driver/uart.h"
 #include "nvs_flash.h"
 #include "lwip/ip_addr.h"
+#include "dhcpserver/dhcpserver.h"
 
 static const char *TAG = "bridge";
 
