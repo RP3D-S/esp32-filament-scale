@@ -208,6 +208,7 @@ static volatile bool  pendWifi = false, pendScan = false;
 static volatile bool  pendBuz = false, pendBuzTest = false;   // buzzer settings / test, applied in loop()
 static volatile int   pendBuzPin = -2, pendBuzLevel = -1;
 static volatile bool  pendStaticIp = false;               // new fixed-IP settings to save and apply, in loop()
+static volatile bool  pendWifiForget = false;             // forget the saved Wi-Fi network, in loop()
 static String         pendSsid, pendPass;
 static uint32_t       bootBtnMs = 0;          // last time BOOT was seen pressed
 static uint32_t       wifiAttemptUntil = 0;   // >0 while a provisioning attempt runs
@@ -704,6 +705,26 @@ static String buildIpFrame(bool full, IpState &st) {
 
 static IpState wsIp, bleIp;
 
+// The saved Wi-Fi network (it can differ from the connected one: it is the one the scale will try), as wsv.
+struct SavedNetState { String ssid = "\x01"; };
+
+static String savedWifiName() {
+    wifi_config_t conf;
+    if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) return "";
+    char b[33]; memcpy(b, conf.sta.ssid, 32); b[32] = 0;
+    return String(b);
+}
+
+static String buildSavedFrame(bool full, SavedNetState &st) {
+    StaticJsonDocument<96> d;
+    String ssid = savedWifiName();
+    putField<String>(d, "wsv", ssid, st.ssid, full);
+    if (d.size() == 0) return "";
+    String out; serializeJson(d, out); return out;
+}
+
+static SavedNetState wsSaved, bleSaved;
+
 // ---- BLE (NimBLE) ----------------------------------------------------------
 // Same JSON as the WebSocket, over one notify characteristic. Commands come back
 // as JSON on a write characteristic: {"cmd":"tare"} / {"cmd":"calibrate","grams":500}.
@@ -809,6 +830,11 @@ public:
             if (*email && *pass) fbLogin(email, pass);
         } else if (!strcmp(cmd, "fb_logout")) {
             fbLogout();
+        } else if (!strcmp(cmd, "wifi_forget")) {
+            // Same rule as changing the network: with Wi-Fi up it needs BOOT pressed in the last 30 s.
+            bool allowed = WiFi.status() != WL_CONNECTED || (bootBtnMs && millis() - bootBtnMs < 30000);
+            if (!allowed) { bleSend("{\"wifi_err\":\"boot\"}"); return; }
+            pendWifiForget = true;
         } else if (!strcmp(cmd, "ip_set")) {
             // Same rule as changing the network: with Wi-Fi up it needs BOOT pressed in the last 30 s.
             bool allowed = WiFi.status() != WL_CONNECTED || (bootBtnMs && millis() - bootBtnMs < 30000);
@@ -903,7 +929,7 @@ static void enqueueAvatar(const String &url) {
 
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
-        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState(); bleSnd = SndState(); bleIp = IpState();
+        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState(); bleSnd = SndState(); bleIp = IpState(); bleSaved = SavedNetState();
         for (int i = 0; i < bleQueued; i++) bleQueue[i] = "";
         bleQueued = 0;
         return;
@@ -916,6 +942,7 @@ static void pumpBle(bool periodicFull) {
     bleEnqueue(buildOtaFrame(full, bleOta));
     bleEnqueue(buildSndFrame(full, bleSnd));
     bleEnqueue(buildIpFrame(full, bleIp));
+    bleEnqueue(buildSavedFrame(full, bleSaved));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -1329,6 +1356,14 @@ void loop() {
         if (!buzzerConfigure(pendBuzPin, pendBuzLevel)) bleSend("{\"bz_err\":\"pin\"}");
     }
     if (pendBuzTest) { pendBuzTest = false; buzzerSuccess(); }
+    if (pendWifiForget) {
+        pendWifiForget = false;
+        // Keep the radio on (so the app can scan for another network) but erase the saved one. The fixed IP, if any,
+        // stays: it is a separate setting the app shows and can change.
+        WiFi.disconnect(false, true);
+        wifiAttemptUntil = 0; wifiFailed = false; mdnsOn = false;
+        Serial.println("[WIFI] saved network forgotten");
+    }
     if (pendStaticIp) {
         pendStaticIp = false;
         saveStaticIp();
@@ -1431,6 +1466,8 @@ void loop() {
             if (sf.length() && ws.availableForWriteAll()) ws.textAll(sf);
             String ipf = buildIpFrame(full, wsIp);
             if (ipf.length() && ws.availableForWriteAll()) ws.textAll(ipf);
+            String svf = buildSavedFrame(full, wsSaved);
+            if (svf.length() && ws.availableForWriteAll()) ws.textAll(svf);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
             wsRf = RfState();
@@ -1438,6 +1475,7 @@ void loop() {
             wsOta = OtaState();
             wsSnd = SndState();
             wsIp = IpState();
+            wsSaved = SavedNetState();
         }
         lap(6);
         // At most 2 WebSocket clients, oldest closed first. A phone that went to sleep (Doze) leaves a dead
