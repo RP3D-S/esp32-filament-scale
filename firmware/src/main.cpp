@@ -15,6 +15,7 @@
 #include <ArduinoOTA.h>
 #include <esp_ota_ops.h>
 #include "ota.h"
+#include "buzzer.h"
 #include "firebase.h"
 #include "workflow.h"
 #include <Adafruit_PN532.h>
@@ -204,6 +205,8 @@ static volatile bool  pendWfStop = false;
 static volatile uint32_t pendRestartAt = 0;
 static volatile float pendCalGrams = 0;
 static volatile bool  pendWifi = false, pendScan = false;
+static volatile bool  pendBuz = false, pendBuzTest = false;   // buzzer settings / test, applied in loop()
+static volatile int   pendBuzPin = -2, pendBuzLevel = -1;
 static String         pendSsid, pendPass;
 static uint32_t       bootBtnMs = 0;          // last time BOOT was seen pressed
 static uint32_t       wifiAttemptUntil = 0;   // >0 while a provisioning attempt runs
@@ -416,6 +419,7 @@ static void calTick() {
             saveTare();
             calErr = "";
             calSetPhase(CAL_SAVED);
+            buzzerSaved();
         } else if (now - calPhaseAt > CAL_STEP_TIMEOUT_MS) calFail("read");
         break;
 
@@ -474,6 +478,13 @@ static void updateStatus() {
     in.twin = sp.twin;
     WfOutputs out;
     wfUpdate(in, out);
+    {   // sound: the weight reached the cloud / the send failed (the workflow counts both)
+        static uint32_t okSeen = 0, failSeen = 0;
+        WfStats st_ = wfStats();
+        if (st_.sendOk > okSeen) buzzerSuccess();
+        else if (st_.sendFail > failSeen) buzzerError();
+        okSeen = st_.sendOk; failSeen = st_.sendFail;
+    }
     if (out.tare) pendTare = true;
     uid = wfUid();
     if (uid.isEmpty() && tagLive.isEmpty() && metaUid.length()) { metaUid = ""; tagMeta = TagMeta(); }
@@ -487,6 +498,10 @@ static void pollRfid() {
     last = millis();
     String u;
     if (reader.ok && reader.poll(u)) {
+        // One beep per tag read. The reader can lose a tag for a moment, so the same UID is not announced
+        // again within 8 s.
+        static String beepUid; static uint32_t beepAt = 0;
+        if (tagLive.isEmpty() && (u != beepUid || millis() - beepAt > 8000)) { buzzerTagRead(); beepUid = u; beepAt = millis(); }
         tagLive = u; seenMs = millis();
         if (rfTest) testUid = u;
         // Brand / material / colour live in the tag's pages 5-8. A single failed read must not mean "no
@@ -613,6 +628,20 @@ static RfState wsRf, bleRf;
 static CalState wsCal, bleCal;
 static OtaState wsOta, bleOta;
 
+// Buzzer settings for the app: bz_pin (-1 = disabled) and bz_lvl (0 off .. 3 loud).
+struct SndState { int pin = -9, lvl = -9; };
+
+static String buildSndFrame(bool full, SndState &st) {
+    StaticJsonDocument<64> d;
+    int pin = buzzerPin(), lvl = buzzerLevel();
+    putField<int>(d, "bz_pin", pin, st.pin, full);
+    putField<int>(d, "bz_lvl", lvl, st.lvl, full);
+    if (d.size() == 0) return "";
+    String out; serializeJson(d, out); return out;
+}
+
+static SndState wsSnd, bleSnd;
+
 // ---- BLE (NimBLE) ----------------------------------------------------------
 // Same JSON as the WebSocket, over one notify characteristic. Commands come back
 // as JSON on a write characteristic: {"cmd":"tare"} / {"cmd":"calibrate","grams":500}.
@@ -677,6 +706,12 @@ public:
             } else if (!strcmp(cmd, "cal_factor")) {
                 float f = d["value"] | 0.0f;
                 if (f > 0) pendCalFactor = f;       // manual entry, same path as Studio's calibration_set
+            } else if (!strcmp(cmd, "buzzer")) {
+                pendBuzPin = d.containsKey("pin") ? (int)d["pin"] : -2;      // -1 disables, absent keeps
+                pendBuzLevel = d.containsKey("level") ? (int)d["level"] : -1; // 0 off .. 3 loud, absent keeps
+                pendBuz = true;
+            } else if (!strcmp(cmd, "buzzer_test")) {
+                pendBuzTest = true;
             } else if (!strcmp(cmd, "wifi_scan")) {
                 pendScan = true;
             } else if (!strcmp(cmd, "rfid_test")) {
@@ -792,7 +827,7 @@ static void enqueueAvatar(const String &url) {
 
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
-        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState();
+        bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState(); bleSnd = SndState();
         for (int i = 0; i < bleQueued; i++) bleQueue[i] = "";
         bleQueued = 0;
         return;
@@ -803,6 +838,7 @@ static void pumpBle(bool periodicFull) {
     bleEnqueue(buildRfFrame(full, bleRf));
     bleEnqueue(buildCalFrame(full, bleCal));
     bleEnqueue(buildOtaFrame(full, bleOta));
+    bleEnqueue(buildSndFrame(full, bleSnd));
 
     // Network frame, delta-compressed with the same rule: ssid / ip / wifi state.
     StaticJsonDocument<192> d;
@@ -1023,6 +1059,20 @@ static void setupRoutes() {
         });
     server.addHandler(calw);
 
+    // Buzzer: {"pin":26,"level":2} saves the pin (-1 disables) and the volume (0 off .. 3 loud); {"test":true} plays the
+    // success sound. Any key may be left out.
+    auto *buz = new AsyncCallbackJsonWebHandler("/api/buzzer",
+        [](AsyncWebServerRequest *r, JsonVariant &j) {
+            if (j.containsKey("pin") || j.containsKey("level")) {
+                pendBuzPin = j.containsKey("pin") ? (int)j["pin"] : -2;
+                pendBuzLevel = j.containsKey("level") ? (int)j["level"] : -1;
+                pendBuz = true;
+            }
+            if (j["test"] | false) pendBuzTest = true;
+            r->send(200, "application/json", "{\"ok\":true}");
+        });
+    server.addHandler(buz);
+
     // Put a known weight on the platform, then POST {"knownGrams":500}.
     auto *cal2 = new AsyncCallbackJsonWebHandler("/api/calibrate",
         [](AsyncWebServerRequest *r, JsonVariant &j) {
@@ -1095,6 +1145,7 @@ void setup() {
     long tare    = prefs.getLong("tare", 0);
     calDone      = prefs.isKey("cal");
     prefs.end();
+    buzzerBegin();
 
     scale.begin(HX711_DOUT, HX711_SCK);
     scale.set_scale(calFactor);
@@ -1189,6 +1240,12 @@ void loop() {
 
     ArduinoOTA.handle();   // blocks for the length of an update, which is the intent; a no-op otherwise
     otaLoop();
+    buzzerTick();
+    if (pendBuz) {
+        pendBuz = false;
+        if (!buzzerConfigure(pendBuzPin, pendBuzLevel)) bleSend("{\"bz_err\":\"pin\"}");
+    }
+    if (pendBuzTest) { pendBuzTest = false; buzzerSuccess(); }
     calTick();
     // While the wizard runs it owns the load cell: tare / factor changes wait until it is done.
     if (pendTare)           { pendTare = false; if (!calActive()) doTare(); }
@@ -1279,11 +1336,14 @@ void loop() {
             if (cf.length() && ws.availableForWriteAll()) ws.textAll(cf);
             String of = buildOtaFrame(full, wsOta);
             if (of.length() && ws.availableForWriteAll()) ws.textAll(of);
+            String sf = buildSndFrame(full, wsSnd);
+            if (sf.length() && ws.availableForWriteAll()) ws.textAll(sf);
         } else {
             wsState = FrameState();   // no listeners: next client gets a full frame
             wsRf = RfState();
             wsCal = CalState();
             wsOta = OtaState();
+            wsSnd = SndState();
         }
         lap(6);
         // At most 2 WebSocket clients, oldest closed first. A phone that went to sleep (Doze) leaves a dead
