@@ -134,4 +134,16 @@
     <string name="fw_need_net">Telefon i waga muszą być w tej samej sieci Wi-Fi.</string>
     <string name="fw_keep_open">Nie zamykaj aplikacji i nie odłączaj wagi do końca.</string>
     <string name="fw_no_release">Nie znaleziono wersji oprogramowania online.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Dźwięk</string>
+    <string name="snd_volume">Głośność</string>
+    <string name="snd_off">Wycisz</string>
+    <string name="snd_low">Cicho</string>
+    <string name="snd_medium">Średnio</string>
+    <string name="snd_high">Głośno</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Pin buzzera (GPIO)</string>
+    <string name="snd_none">Brak</string>
+    <string name="snd_test">Testuj dźwięk</string>
+    <string name="snd_hint">Buzzer pasywny: przewód sygnałowy do wybranego pinu, drugi do GND.</string>
 </resources>

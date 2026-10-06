@@ -134,4 +134,16 @@
     <string name="fw_need_net">Handy und Waage müssen im selben WLAN sein.</string>
     <string name="fw_keep_open">App geöffnet lassen und die Waage am Strom, bis es fertig ist.</string>
     <string name="fw_no_release">Online wurde keine Firmware-Version gefunden.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Ton</string>
+    <string name="snd_volume">Lautst.</string>
+    <string name="snd_off">Stumm</string>
+    <string name="snd_low">Leise</string>
+    <string name="snd_medium">Mittel</string>
+    <string name="snd_high">Laut</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Buzzer-Pin (GPIO)</string>
+    <string name="snd_none">Keiner</string>
+    <string name="snd_test">Ton testen</string>
+    <string name="snd_hint">Passiver Buzzer: Signalleitung an den gewählten Pin, die andere an GND.</string>
 </resources>

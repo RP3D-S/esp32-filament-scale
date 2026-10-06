@@ -271,6 +271,23 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         ble.sendSecure("""{"cmd":"fb_logout"}""")
     }
 
+    /**
+     * Buzzer on the scale: [pin] is the GPIO (-1 disables it) and [level] the volume 0 off .. 3 loud; leave one
+     * out to keep it. The scale refuses a pin that is not a free output and the unchanged value comes back.
+     */
+    fun buzzerSet(pin: Int? = null, level: Int? = null) {
+        val parts = buildList {
+            if (pin != null) add(""""pin":$pin""")
+            if (level != null) add(""""level":$level""")
+        }
+        if (parts.isEmpty()) return
+        val body = parts.joinToString(",")
+        command("/api/buzzer", "{$body}", """{"cmd":"buzzer",$body}""")
+    }
+
+    /** Plays the success sound once, to hear that the buzzer is wired and the volume is right. */
+    fun buzzerTest() = command("/api/buzzer", """{"test":true}""", """{"cmd":"buzzer_test"}""")
+
     /** Restarts the scale. Over the encrypted characteristic: it interrupts whatever is running. */
     fun restartScale() {
         if (!ble.sendSecure("""{"cmd":"restart"}""")) _state.update { it.copy(message = str(R.string.msg_bt_first)) }

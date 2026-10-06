@@ -134,4 +134,16 @@
     <string name="fw_need_net">The phone and the scale must be on the same Wi-Fi.</string>
     <string name="fw_keep_open">Keep the app open and the scale powered until it finishes.</string>
     <string name="fw_no_release">No firmware release found online.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Sound</string>
+    <string name="snd_volume">Volume</string>
+    <string name="snd_off">Mute</string>
+    <string name="snd_low">Low</string>
+    <string name="snd_medium">Medium</string>
+    <string name="snd_high">High</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Buzzer pin (GPIO)</string>
+    <string name="snd_none">None</string>
+    <string name="snd_test">Test sound</string>
+    <string name="snd_hint">Passive buzzer: signal wire to the chosen GPIO, the other to GND.</string>
 </resources>

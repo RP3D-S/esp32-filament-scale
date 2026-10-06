@@ -59,6 +59,9 @@ data class ScaleState(
     val otaPct: Int = 0,
     val otaToken: String = "",
     val otaErr: String = "",
+    /** Buzzer on the scale: GPIO (-1 = disabled, -9 = not heard from yet) and volume 0 off .. 3 loud (-1 = unknown). */
+    val bzPin: Int = -9,
+    val bzLvl: Int = -1,
     val searching: Boolean = false,
     /** BLE: the chosen scale (name), none chosen yet, nearby scales while picking, permission granted */
     val scaleName: String = "",
@@ -114,4 +117,6 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     otaPct = if (j.has("ota_pct")) j.optInt("ota_pct") else otaPct,
     otaToken = if (j.has("ota_tok")) j.optString("ota_tok") else otaToken,
     otaErr = if (j.has("ota_err")) j.optString("ota_err") else otaErr,
+    bzPin = if (j.has("bz_pin")) j.optInt("bz_pin") else bzPin,
+    bzLvl = if (j.has("bz_lvl")) j.optInt("bz_lvl") else bzLvl,
 )

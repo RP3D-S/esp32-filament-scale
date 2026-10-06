@@ -134,4 +134,16 @@
     <string name="fw_need_net">Telefono e bilancia devono essere sullo stesso Wi-Fi.</string>
     <string name="fw_keep_open">Tieni l\'app aperta e la bilancia alimentata fino alla fine.</string>
     <string name="fw_no_release">Nessuna versione del firmware trovata online.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Suono</string>
+    <string name="snd_volume">Volume</string>
+    <string name="snd_off">Muto</string>
+    <string name="snd_low">Basso</string>
+    <string name="snd_medium">Medio</string>
+    <string name="snd_high">Alto</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Pin del buzzer (GPIO)</string>
+    <string name="snd_none">Nessuno</string>
+    <string name="snd_test">Prova suono</string>
+    <string name="snd_hint">Buzzer passivo: filo di segnale al pin scelto, l\'altro a GND.</string>
 </resources>

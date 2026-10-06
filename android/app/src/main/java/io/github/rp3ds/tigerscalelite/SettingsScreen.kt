@@ -99,9 +99,10 @@ data class SettingsActions(
     val onLanguage: () -> Unit,
     val onRfid: () -> Unit,
     val onFirmware: () -> Unit,
+    val onSound: () -> Unit,
 )
 
-private enum class RowIcon { BLUETOOTH, WIFI, USER, TARGET, PENCIL, GLOBE, CHIP, REFRESH, TRASH }
+private enum class RowIcon { BLUETOOTH, WIFI, USER, SOUND, TARGET, PENCIL, GLOBE, CHIP, REFRESH, TRASH }
 
 /**
  * The original scale's Settings menu (runSettingsMenu) as a list of rows: icon, name, the current
@@ -157,6 +158,13 @@ fun SettingsScreen(s: ScaleState, a: SettingsActions, onRestart: () -> Unit, onF
                 SettingRow(
                     RowIcon.USER, when (s.fbState) { 2 -> GREEN; 1 -> ACCENT; else -> RED },
                     stringResource(R.string.row_account), accountValue, enabled = ble, onClick = a.onAccount,
+                )
+                // Like the original's Volume row: the buzzer replaces its speaker. Muted or unwired shows in grey.
+                val soundOff = s.bzLvl == 0 || s.bzPin == -1
+                SettingRow(
+                    RowIcon.SOUND, if (soundOff) MUTED else TEXT, stringResource(R.string.snd_title),
+                    when { s.bzLvl < 0 -> ""; s.bzPin == -1 -> stringResource(R.string.snd_off); else -> volumeName(s.bzLvl) },
+                    enabled = s.connected, onClick = a.onSound,
                 )
                 SettingRow(
                     RowIcon.TARGET, TEXT, stringResource(R.string.cal_wizard),
@@ -336,6 +344,16 @@ private fun Icon26(icon: RowIcon, c: Color) {
                 drawArc(c, -50f, 280f, false, p(4f, 4f), Size(18f * u, 18f * u), style = Stroke(2.4f * u, cap = StrokeCap.Round))
                 val head = Path().apply { moveTo(15f * u, 1f * u); lineTo(21f * u, 5f * u); lineTo(14f * u, 8f * u); close() }
                 drawPath(head, c)
+            }
+            RowIcon.SOUND -> {
+                val cone = Path().apply {
+                    moveTo(2f * u, 10f * u); lineTo(7f * u, 10f * u); lineTo(13f * u, 5f * u)
+                    lineTo(13f * u, 21f * u); lineTo(7f * u, 16f * u); lineTo(2f * u, 16f * u); close()
+                }
+                drawPath(cone, c)
+                val wave = Stroke(2f * u, cap = StrokeCap.Round)
+                drawArc(c, -45f, 90f, false, p(9f, 8f), Size(10f * u, 10f * u), style = wave)
+                drawArc(c, -45f, 90f, false, p(5f, 4f), Size(18f * u, 18f * u), style = wave)
             }
             RowIcon.TRASH -> {
                 bar(5f, 6f, 16f, 2f); bar(10f, 3f, 6f, 3f)

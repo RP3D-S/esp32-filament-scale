@@ -134,4 +134,16 @@
     <string name="fw_need_net">El teléfono y la báscula deben estar en la misma Wi-Fi.</string>
     <string name="fw_keep_open">Mantén la app abierta y la báscula encendida hasta que termine.</string>
     <string name="fw_no_release">No se encontró ninguna versión del firmware en línea.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Sonido</string>
+    <string name="snd_volume">Volumen</string>
+    <string name="snd_off">Silencio</string>
+    <string name="snd_low">Bajo</string>
+    <string name="snd_medium">Medio</string>
+    <string name="snd_high">Alto</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Pin del zumbador (GPIO)</string>
+    <string name="snd_none">Ninguno</string>
+    <string name="snd_test">Probar sonido</string>
+    <string name="snd_hint">Zumbador pasivo: cable de señal al pin elegido, el otro a GND.</string>
 </resources>

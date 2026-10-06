@@ -105,10 +105,12 @@ class MainActivity : ComponentActivity() {
                         CalActions(vm::calStart, vm::calTare, vm::calRef, vm::calMeasure, vm::calBack, vm::calCancel, vm::calFactor)
                     }
                     val fwUi by vm.fw.collectAsStateWithLifecycle()
+                    val snd = remember { SoundActions(vm::buzzerSet, vm::buzzerTest) }
                     val fw = FwActions(fwUi, vm::fwCheck, vm::fwUpdate, { pickFirmware.launch(arrayOf("*/*")) }, vm::fwReset)
                     ScaleScreen(
                         s = s,
                         fw = fw,
+                        snd = snd,
                         onTare = vm::tare,
                         cal = cal,
                         onHost = vm::setHost,
@@ -136,6 +138,7 @@ class MainActivity : ComponentActivity() {
 fun ScaleScreen(
     s: ScaleState,
     fw: FwActions,
+    snd: SoundActions,
     onTare: () -> Unit,
     cal: CalActions,
     onHost: (String) -> Unit,
@@ -195,7 +198,7 @@ fun ScaleScreen(
             s, { showSettings = false }, cal, onWizard = { showSettings = false; showWizard = true },
             onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
             onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
-            onRestart = onRestart, onFactoryReset = onFactoryReset, fw = fw,
+            onRestart = onRestart, onFactoryReset = onFactoryReset, fw = fw, snd = snd,
         )
     }
     if (showWizard) CalibrationWizard(s, cal) { showWizard = false }
@@ -259,9 +262,11 @@ private fun SettingsDialog(
     onRestart: () -> Unit,
     onFactoryReset: () -> Unit,
     fw: FwActions,
+    snd: SoundActions,
 ) {
     var showScale by remember { mutableStateOf(false) }
     var showFw by remember { mutableStateOf(false) }
+    var showSound by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
     var showHost by remember { mutableStateOf(false) }
     var showWifi by remember { mutableStateOf(false) }
@@ -281,12 +286,14 @@ private fun SettingsDialog(
             onLanguage = { showLang = true },
             onRfid = { showRfid = true },
             onFirmware = { showFw = true },
+            onSound = { showSound = true },
         ),
         onRestart = onRestart,
         onFactoryReset = onFactoryReset,
     )
 
     if (showFw) FirmwareDialog(s, fw) { showFw = false }
+    if (showSound) SoundDialog(s, snd) { showSound = false }
     if (showScale) ScaleDialog(s, { showScale = false }, onSearch, { showHost = true }, onPickScale, onForget)
     if (showLang) LanguageDialog { showLang = false }
     if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)

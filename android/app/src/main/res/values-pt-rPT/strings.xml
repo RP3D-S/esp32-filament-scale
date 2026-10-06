@@ -134,4 +134,16 @@
     <string name="fw_need_net">O telemóvel e a balança têm de estar na mesma rede Wi-Fi.</string>
     <string name="fw_keep_open">Mantenha a app aberta e a balança ligada até terminar.</string>
     <string name="fw_no_release">Não foi encontrada nenhuma versão do firmware online.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Som</string>
+    <string name="snd_volume">Volume</string>
+    <string name="snd_off">Mudo</string>
+    <string name="snd_low">Baixo</string>
+    <string name="snd_medium">Médio</string>
+    <string name="snd_high">Alto</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Pino do buzzer (GPIO)</string>
+    <string name="snd_none">Nenhum</string>
+    <string name="snd_test">Testar som</string>
+    <string name="snd_hint">Buzzer passivo: fio de sinal no GPIO escolhido, o outro no GND.</string>
 </resources>

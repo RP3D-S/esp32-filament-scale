@@ -134,4 +134,16 @@
     <string name="fw_need_net">手机和秤必须在同一个 Wi-Fi 网络中。</string>
     <string name="fw_keep_open">更新完成前请保持应用打开并为秤供电。</string>
     <string name="fw_no_release">在线未找到固件版本。</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">声音</string>
+    <string name="snd_volume">音量</string>
+    <string name="snd_off">静音</string>
+    <string name="snd_low">低</string>
+    <string name="snd_medium">中</string>
+    <string name="snd_high">高</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">蜂鸣器引脚 (GPIO)</string>
+    <string name="snd_none">无</string>
+    <string name="snd_test">测试声音</string>
+    <string name="snd_hint">无源蜂鸣器：信号线接所选引脚，另一根接 GND。</string>
 </resources>

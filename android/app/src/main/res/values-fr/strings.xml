@@ -134,4 +134,16 @@
     <string name="fw_need_net">Le téléphone et la balance doivent être sur le même Wi-Fi.</string>
     <string name="fw_keep_open">Gardez l\'application ouverte et la balance alimentée jusqu\'à la fin.</string>
     <string name="fw_no_release">Aucune version du micrologiciel trouvée en ligne.</string>
+    <!-- Sound (buzzer) -->
+    <string name="snd_title">Son</string>
+    <string name="snd_volume">Volume</string>
+    <string name="snd_off">Muet</string>
+    <string name="snd_low">Faible</string>
+    <string name="snd_medium">Moyen</string>
+    <string name="snd_high">Fort</string>
+    <string name="snd_unknown">-</string>
+    <string name="snd_pin">Broche du buzzer (GPIO)</string>
+    <string name="snd_none">Aucun</string>
+    <string name="snd_test">Tester le son</string>
+    <string name="snd_hint">Buzzer passif : fil de signal sur la broche choisie, l\'autre sur GND.</string>
 </resources>
