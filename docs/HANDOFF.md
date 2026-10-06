@@ -109,8 +109,9 @@ One PN532, no servo, no screen, no battery. Optional buzzer: signal on **GPIO 26
   accepted (4, 13, 14, 18, 19, 21, 22, 23, 25, 26: never the strapping, flash, serial, PN532, HX711 or input-only
   pins; an invalid one comes back as `bz_err`). Tested on the bench: init, pin refused / accepted, volume, persistence
   across a reboot. **Heard with a passive buzzer on GPIO 26** (the owner confirmed the success sound is right at the
-  volume levels, set over `POST /api/buzzer`). Not exercised yet: the tag-read, error and calibration-saved sounds, and
-  the real triggers (a tag on the platform, a real send to the cloud).
+  volume levels, set over `POST /api/buzzer`), and the owner also confirmed the real triggers: the tag-read beep with a
+  tag on the platform and the success sound after a real send. Not exercised: the low error tone after a failed send
+  and the calibration-saved notes.
 - **Wi-Fi diagnostics in the boot log**: the saved network, the association (SSID and channel), `got IP`, every
   disconnect with its reason name, and a line every 10 s while there is no IP (`[WIFI] ...`).
 - **Fixed IP address** for a router that never answers the scale's DHCP (see the first open item). In the app:
@@ -148,10 +149,7 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    restart it; or connect the scale to a phone hotspot and see whether it gets an address there. I could not sniff
    the DHCP exchange (packet capture needs administrator rights). Until then the fixed IP above is the way to connect:
    pick an address outside the router's DHCP range and not used by another device.
-2. **The buzzer's real triggers are untested**: the success sound is heard (see "What works"), but put a spool with a
-   tag on the platform to hear the tag-read beep and weigh it to hear the send-success sound (a failed send should give
-   the low tone). The error and calibration-saved sounds have no test command yet; the wizard gives the second.
-3. **Main-loop latency: two causes fixed, extended real-world use not yet measured.**
+2. **Main-loop latency: two causes fixed, extended real-world use not yet measured.**
    (a) The PN532 library's `readBytes()` waited the serial timeout (1000 ms) on every "no tag" reply, limiting the
    loop to 1 pass/s (weight took ~4 s to appear and >15 s to return to zero): fixed with `Serial2.setTimeout(30)`.
    (b) `scale.tare(10)` blocked `loop()` for ~900 ms on every tare (the HX711 gives ~10 samples/s, and the auto-tare
@@ -163,7 +161,7 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    Still to do: use the scale for a while with the app unplugged from USB and check that no `[LOOP]` line appears.
    A second, different weight (217 g, the first calibration used 250 g) reads 217 g before and after the change,
    which confirms the factor 943.37 and that the tare change did not touch the grams conversion.
-4. **Phone Wi-Fi link to the scale: understood, two mitigations in, to be watched.** Measured with adb over Wi-Fi:
+3. **Phone Wi-Fi link to the scale: understood, two mitigations in, to be watched.** Measured with adb over Wi-Fi:
    with the screen off the phone is in Doze (`mWakefulness=Dozing`, `deviceidle mState=IDLE`), the network of
    background apps is cut, and the app logged 24 `failed to connect ... after 4000ms` in 150 s (phone->scale ping
    274 ms average). With the screen on: 0 failures, ping 44 ms. In normal use (one phone, app open, BLE + Wi-Fi
@@ -177,22 +175,22 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    goes to the background (`onBackground()`, Bluetooth stays; tested: 0 attempts in 40 s, Wi-Fi back 0.4 s after
    returning) and brings it back in `onForeground()`. If `heartbeat HTTP -1` ever shows up in a normal run,
    look at the heap first (`[FB] heap free=... largest=...` prints every 30 s).
-5. Heap is tight on the classic ESP32 (largest free block ~17-37 KB, lower with more clients connected; right after
+4. Heap is tight on the classic ESP32 (largest free block ~17-37 KB, lower with more clients connected; right after
    a reboot with the app reconnecting it read 17 396 and the first heartbeat failed with `HTTP -11`, a read
    timeout, twice in one session: not explained yet, watch `[FB] heartbeat HTTP` together with `[FB] heap`). AsyncTCP
    stack was cut to 7 KB and the Firebase task to 10 KB for that reason; do not add a second simultaneous TLS
    session, and treat every new client connection as costing contiguous heap that the cloud TLS needs.
-6. BLE link occasionally drops (supervision timeout, status 8; the app logs `ble link stale ... -> reconnect`) when
+5. BLE link occasionally drops (supervision timeout, status 8; the app logs `ble link stale ... -> reconnect`) when
    Wi-Fi/TLS is busy; the app reconnects in ~3 s.
-7. **OTA: the online path is untested, and there is no rollback.** "Check for updates" and the download have not run
+6. **OTA: the online path is untested, and there is no rollback.** "Check for updates" and the download have not run
    against a real release (none is published yet, and publishing is visible to everyone): publish one with
    `release_firmware.py` and try it from the app. What the app shows on screen during an update was not seen by
    me (I only had the scale console and the app log). There is no automatic rollback (the bootloader of this
    platform is not built for it): a firmware that boots but is broken needs a USB flash. The scale never pulls from
    GitHub itself: that needs TLS, and the heap cannot afford it.
-8. Not ported from the original: second NFC reader, servo, battery/PMIC, web UI from `data/www`,
+7. Not ported from the original: second NFC reader, servo, battery/PMIC, web UI from `data/www`,
    rack/position editing, language sync with the account.
-9. Debug logging to remove when done diagnosing: the firmware's `[LOOP]` timing (keep it cheap, it only prints on slow
+8. Debug logging to remove when done diagnosing: the firmware's `[LOOP]` timing (keep it cheap, it only prints on slow
    passes) and the app's `TigerScaleLite` log. The app's `ble frame gap` line is noise: it fires above 1.5 s, but the scale
    only sends a keep-alive every 2 s when nothing changes, so ~2 s gaps are normal.
 
