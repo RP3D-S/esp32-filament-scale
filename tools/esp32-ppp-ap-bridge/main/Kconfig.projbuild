@@ -1,0 +1,29 @@
+menu "PPP-to-WiFi bridge"
+
+    config BRIDGE_AP_SSID
+        string "Access point SSID"
+        default "esp32-bridge"
+
+    config BRIDGE_AP_PASSWORD
+        string "Access point password (8+ chars, empty = open network)"
+        default "changeme123"
+
+    config BRIDGE_AP_CHANNEL
+        int "Access point channel"
+        range 1 13
+        default 6
+
+    config BRIDGE_AP_MAX_CLIENTS
+        int "Maximum WiFi clients"
+        range 1 8
+        default 4
+
+    config BRIDGE_PPP_BAUD
+        int "PPP serial baud rate (must match pc/start-bridge.sh)"
+        default 460800
+
+    config BRIDGE_DNS
+        string "DNS server handed to WiFi clients"
+        default "1.1.1.1"
+
+endmenu
