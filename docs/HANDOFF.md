@@ -108,7 +108,9 @@ One PN532, no servo, no screen, no battery. Optional buzzer: signal on **GPIO 26
   success sound); both saved in NVS (`buzpin`, `buzlvl`) and reported as `bz_pin` / `bz_lvl`. Only free outputs are
   accepted (4, 13, 14, 18, 19, 21, 22, 23, 25, 26: never the strapping, flash, serial, PN532, HX711 or input-only
   pins; an invalid one comes back as `bz_err`). Tested on the bench: init, pin refused / accepted, volume, persistence
-  across a reboot. **Not heard yet: no buzzer was wired**, and the tag and send triggers were not exercised.
+  across a reboot. **Heard with a passive buzzer on GPIO 26** (the owner confirmed the success sound is right at the
+  volume levels, set over `POST /api/buzzer`). Not exercised yet: the tag-read, error and calibration-saved sounds, and
+  the real triggers (a tag on the platform, a real send to the cloud).
 - **Wi-Fi diagnostics in the boot log**: the saved network, the association (SSID and channel), `got IP`, every
   disconnect with its reason name, and a line every 10 s while there is no IP (`[WIFI] ...`).
 - **Fixed IP address** for a router that never answers the scale's DHCP (see the first open item). In the app:
@@ -146,8 +148,9 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    restart it; or connect the scale to a phone hotspot and see whether it gets an address there. I could not sniff
    the DHCP exchange (packet capture needs administrator rights). Until then the fixed IP above is the way to connect:
    pick an address outside the router's DHCP range and not used by another device.
-2. **The buzzer is untested with real hardware**: wire a passive buzzer to GPIO 26 (or choose another pin in
-   Settings > Sound) and use "Test sound", then a real tag and a real send.
+2. **The buzzer's real triggers are untested**: the success sound is heard (see "What works"), but put a spool with a
+   tag on the platform to hear the tag-read beep and weigh it to hear the send-success sound (a failed send should give
+   the low tone). The error and calibration-saved sounds have no test command yet; the wizard gives the second.
 3. **Main-loop latency: two causes fixed, extended real-world use not yet measured.**
    (a) The PN532 library's `readBytes()` waited the serial timeout (1000 ms) on every "no tag" reply, limiting the
    loop to 1 pass/s (weight took ~4 s to appear and >15 s to return to zero): fixed with `Serial2.setTimeout(30)`.
