@@ -146,4 +146,15 @@
     <string name="snd_none">Ninguno</string>
     <string name="snd_test">Probar sonido</string>
     <string name="snd_hint">Zumbador pasivo: cable de señal al pin elegido, el otro a GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Usar una dirección IP fija</string>
+    <string name="ip_address">Dirección IP</string>
+    <string name="ip_gateway">Puerta de enlace (router)</string>
+    <string name="ip_mask">Máscara de subred</string>
+    <string name="ip_dns">Servidor DNS (opcional)</string>
+    <string name="ip_fill">Rellenar con el Wi-Fi de este teléfono</string>
+    <string name="ip_hint">Usa una dirección fuera del rango que reparte tu router (mira su configuración DHCP) y que no use otro dispositivo. Úsala solo si la báscula se conecta pero nunca recibe dirección.</string>
+    <string name="ip_invalid">Revisa las direcciones: la IP y la puerta de enlace deben estar en la misma red y la máscara ser válida.</string>
+    <string name="ip_apply">Aplicar solo la dirección</string>
+    <string name="ip_current">Dirección fija en uso: %1$s</string>
 </resources>

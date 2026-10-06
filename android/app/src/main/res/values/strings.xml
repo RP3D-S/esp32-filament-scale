@@ -146,4 +146,15 @@
     <string name="snd_none">None</string>
     <string name="snd_test">Test sound</string>
     <string name="snd_hint">Passive buzzer: signal wire to the chosen GPIO, the other to GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Use a fixed IP address</string>
+    <string name="ip_address">IP address</string>
+    <string name="ip_gateway">Gateway (router)</string>
+    <string name="ip_mask">Subnet mask</string>
+    <string name="ip_dns">DNS server (optional)</string>
+    <string name="ip_fill">Fill in from this phone\'s Wi-Fi</string>
+    <string name="ip_hint">Use an address outside the range your router hands out (see its DHCP settings) and not used by another device. Use it only if the scale connects but never gets an address.</string>
+    <string name="ip_invalid">Check the addresses: the IP and the gateway must be on the same network, and the mask valid.</string>
+    <string name="ip_apply">Apply address only</string>
+    <string name="ip_current">Fixed address in use: %1$s</string>
 </resources>

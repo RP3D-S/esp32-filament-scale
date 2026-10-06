@@ -158,7 +158,7 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         }
         // BLE frames carry the scale's IP: if no Wi-Fi address is set yet, adopt it.
         val s = _state.value
-        if (s.host.isBlank() && s.ip.isNotBlank()) setHost(s.ip)
+        if (s.ip.isNotBlank() && s.ip != s.host) setHost(s.ip)
     }
 
     /** Call once the Bluetooth permissions are granted. */
@@ -257,7 +257,30 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
     fun configureWifi(ssid: String, pass: String) {
         val body = org.json.JSONObject().put("cmd", "wifi").put("ssid", ssid).put("pass", pass).toString()
         _state.update { it.copy(wifiNeedsBoot = false, wifiState = 1) }
-        if (!ble.sendSecure(body)) _state.update { it.copy(message = str(R.string.msg_bt_first), wifiState = 0) }
+        viewModelScope.launch {
+            waitForBleGap()        // a fixed-IP write may have just gone out: the link takes one write at a time
+            if (!ble.sendSecure(body)) _state.update { it.copy(message = str(R.string.msg_bt_first), wifiState = 0) }
+        }
+    }
+
+    // BLE takes one write at a time and this layer does not queue: leave a gap after each encrypted write.
+    @Volatile private var lastSecureWriteMs = 0L
+
+    private suspend fun waitForBleGap() {
+        val wait = 900 - (SystemClock.elapsedRealtime() - lastSecureWriteMs)
+        if (wait > 0) delay(wait)
+    }
+
+    /**
+     * Fixed address for the scale's Wi-Fi (or DHCP again when [f].on is false). The scale applies it and reconnects;
+     * with Wi-Fi already up it asks for BOOT to be pressed first, like any change of network.
+     */
+    fun applyFixedIp(f: FixedIp) {
+        val body = org.json.JSONObject().put("cmd", "ip_set").put("en", f.on)
+        if (f.on) body.put("ip", f.ip).put("gw", f.gw).put("mask", f.mask).put("dns", f.dns)
+        _state.update { it.copy(ipErr = "", wifiNeedsBoot = false) }
+        lastSecureWriteMs = SystemClock.elapsedRealtime()
+        if (!ble.sendSecure(body.toString())) _state.update { it.copy(message = str(R.string.msg_bt_first)) }
     }
 
     /** Signs the scale in to the TigerTag cloud. Goes over the encrypted BLE characteristic. */

@@ -146,4 +146,15 @@
     <string name="snd_none">Nenhum</string>
     <string name="snd_test">Testar som</string>
     <string name="snd_hint">Buzzer passivo: fio de sinal no GPIO escolhido, o outro no GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Usar um endereço IP fixo</string>
+    <string name="ip_address">Endereço IP</string>
+    <string name="ip_gateway">Gateway (roteador)</string>
+    <string name="ip_mask">Máscara de sub-rede</string>
+    <string name="ip_dns">Servidor DNS (opcional)</string>
+    <string name="ip_fill">Preencher com o Wi-Fi deste celular</string>
+    <string name="ip_hint">Use um endereço fora da faixa que o roteador distribui (veja as definições de DHCP) e que nenhum outro aparelho use. Só use se a balança se liga mas nunca recebe endereço.</string>
+    <string name="ip_invalid">Verifique os endereços: o IP e o gateway têm de estar na mesma rede e a máscara ser válida.</string>
+    <string name="ip_apply">Aplicar só o endereço</string>
+    <string name="ip_current">Endereço fixo em uso: %1$s</string>
 </resources>

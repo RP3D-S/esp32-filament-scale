@@ -146,4 +146,15 @@
     <string name="snd_none">无</string>
     <string name="snd_test">测试声音</string>
     <string name="snd_hint">无源蜂鸣器：信号线接所选引脚，另一根接 GND。</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">使用固定 IP 地址</string>
+    <string name="ip_address">IP 地址</string>
+    <string name="ip_gateway">网关（路由器）</string>
+    <string name="ip_mask">子网掩码</string>
+    <string name="ip_dns">DNS 服务器（可选）</string>
+    <string name="ip_fill">使用本手机的 Wi-Fi 信息填写</string>
+    <string name="ip_hint">请使用路由器分配范围之外、且未被其他设备占用的地址（见路由器的 DHCP 设置）。仅当秤已连接但始终拿不到地址时才使用。</string>
+    <string name="ip_invalid">请检查地址：IP 与网关须在同一网络，子网掩码须有效。</string>
+    <string name="ip_apply">仅应用地址</string>
+    <string name="ip_current">正在使用固定地址：%1$s</string>
 </resources>

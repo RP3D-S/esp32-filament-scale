@@ -146,4 +146,15 @@
     <string name="snd_none">Aucun</string>
     <string name="snd_test">Tester le son</string>
     <string name="snd_hint">Buzzer passif : fil de signal sur la broche choisie, l\'autre sur GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Utiliser une adresse IP fixe</string>
+    <string name="ip_address">Adresse IP</string>
+    <string name="ip_gateway">Passerelle (routeur)</string>
+    <string name="ip_mask">Masque de sous-réseau</string>
+    <string name="ip_dns">Serveur DNS (facultatif)</string>
+    <string name="ip_fill">Remplir avec le Wi-Fi de ce téléphone</string>
+    <string name="ip_hint">Utilisez une adresse hors de la plage distribuée par votre routeur (voir ses réglages DHCP) et non utilisée par un autre appareil. À n\'utiliser que si la balance se connecte sans jamais obtenir d\'adresse.</string>
+    <string name="ip_invalid">Vérifiez les adresses : l\'IP et la passerelle doivent être sur le même réseau et le masque valide.</string>
+    <string name="ip_apply">Appliquer seulement l\'adresse</string>
+    <string name="ip_current">Adresse fixe utilisée : %1$s</string>
 </resources>

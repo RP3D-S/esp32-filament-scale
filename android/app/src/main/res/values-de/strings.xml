@@ -146,4 +146,15 @@
     <string name="snd_none">Keiner</string>
     <string name="snd_test">Ton testen</string>
     <string name="snd_hint">Passiver Buzzer: Signalleitung an den gewählten Pin, die andere an GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Feste IP-Adresse verwenden</string>
+    <string name="ip_address">IP-Adresse</string>
+    <string name="ip_gateway">Gateway (Router)</string>
+    <string name="ip_mask">Subnetzmaske</string>
+    <string name="ip_dns">DNS-Server (optional)</string>
+    <string name="ip_fill">Mit dem WLAN dieses Handys ausfüllen</string>
+    <string name="ip_hint">Verwende eine Adresse außerhalb des vom Router vergebenen Bereichs (siehe DHCP-Einstellungen), die kein anderes Gerät nutzt. Nur verwenden, wenn die Waage sich verbindet, aber nie eine Adresse erhält.</string>
+    <string name="ip_invalid">Adressen prüfen: IP und Gateway müssen im selben Netz liegen und die Maske gültig sein.</string>
+    <string name="ip_apply">Nur Adresse anwenden</string>
+    <string name="ip_current">Feste Adresse aktiv: %1$s</string>
 </resources>

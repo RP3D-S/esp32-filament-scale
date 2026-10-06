@@ -146,4 +146,15 @@
     <string name="snd_none">Nessuno</string>
     <string name="snd_test">Prova suono</string>
     <string name="snd_hint">Buzzer passivo: filo di segnale al pin scelto, l\'altro a GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Usa un indirizzo IP fisso</string>
+    <string name="ip_address">Indirizzo IP</string>
+    <string name="ip_gateway">Gateway (router)</string>
+    <string name="ip_mask">Maschera di sottorete</string>
+    <string name="ip_dns">Server DNS (facoltativo)</string>
+    <string name="ip_fill">Compila con il Wi-Fi di questo telefono</string>
+    <string name="ip_hint">Usa un indirizzo fuori dall\'intervallo assegnato dal router (vedi le impostazioni DHCP) e non usato da altri dispositivi. Usalo solo se la bilancia si collega ma non riceve mai un indirizzo.</string>
+    <string name="ip_invalid">Controlla gli indirizzi: IP e gateway devono essere nella stessa rete e la maschera valida.</string>
+    <string name="ip_apply">Applica solo l\'indirizzo</string>
+    <string name="ip_current">Indirizzo fisso in uso: %1$s</string>
 </resources>

@@ -62,6 +62,13 @@ data class ScaleState(
     /** Buzzer on the scale: GPIO (-1 = disabled, -9 = not heard from yet) and volume 0 off .. 3 loud (-1 = unknown). */
     val bzPin: Int = -9,
     val bzLvl: Int = -1,
+    /** Fixed IP on the scale (empty strings until it reports): on = the scale uses it instead of DHCP; ipErr = addr | boot. */
+    val sipOn: Boolean = false,
+    val sipIp: String = "",
+    val sipGw: String = "",
+    val sipMask: String = "",
+    val sipDns: String = "",
+    val ipErr: String = "",
     val searching: Boolean = false,
     /** BLE: the chosen scale (name), none chosen yet, nearby scales while picking, permission granted */
     val scaleName: String = "",
@@ -119,4 +126,10 @@ fun ScaleState.merge(j: JSONObject): ScaleState = copy(
     otaErr = if (j.has("ota_err")) j.optString("ota_err") else otaErr,
     bzPin = if (j.has("bz_pin")) j.optInt("bz_pin") else bzPin,
     bzLvl = if (j.has("bz_lvl")) j.optInt("bz_lvl") else bzLvl,
+    sipOn = if (j.has("sip")) j.optInt("sip") == 1 else sipOn,
+    sipIp = if (j.has("sip_ip")) j.optString("sip_ip").takeUnless { it == "0.0.0.0" } ?: "" else sipIp,
+    sipGw = if (j.has("sip_gw")) j.optString("sip_gw").takeUnless { it == "0.0.0.0" } ?: "" else sipGw,
+    sipMask = if (j.has("sip_mask")) j.optString("sip_mask").takeUnless { it == "0.0.0.0" } ?: "" else sipMask,
+    sipDns = if (j.has("sip_dns")) j.optString("sip_dns").takeUnless { it == "0.0.0.0" } ?: "" else sipDns,
+    ipErr = if (j.has("ip_err")) j.optString("ip_err") else if (j.has("sip")) "" else ipErr,
 )

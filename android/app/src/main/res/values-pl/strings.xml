@@ -146,4 +146,15 @@
     <string name="snd_none">Brak</string>
     <string name="snd_test">Testuj dźwięk</string>
     <string name="snd_hint">Buzzer pasywny: przewód sygnałowy do wybranego pinu, drugi do GND.</string>
+    <!-- Fixed IP address -->
+    <string name="ip_use">Użyj stałego adresu IP</string>
+    <string name="ip_address">Adres IP</string>
+    <string name="ip_gateway">Brama (router)</string>
+    <string name="ip_mask">Maska podsieci</string>
+    <string name="ip_dns">Serwer DNS (opcjonalnie)</string>
+    <string name="ip_fill">Uzupełnij z Wi-Fi tego telefonu</string>
+    <string name="ip_hint">Użyj adresu spoza zakresu rozdzielanego przez router (zobacz ustawienia DHCP), którego nie używa inne urządzenie. Tylko gdy waga łączy się, ale nigdy nie dostaje adresu.</string>
+    <string name="ip_invalid">Sprawdź adresy: IP i brama muszą być w tej samej sieci, a maska poprawna.</string>
+    <string name="ip_apply">Zastosuj tylko adres</string>
+    <string name="ip_current">Używany stały adres: %1$s</string>
 </resources>

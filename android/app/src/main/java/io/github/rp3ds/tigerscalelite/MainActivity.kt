@@ -106,11 +106,13 @@ class MainActivity : ComponentActivity() {
                     }
                     val fwUi by vm.fw.collectAsStateWithLifecycle()
                     val snd = remember { SoundActions(vm::buzzerSet, vm::buzzerTest) }
+                    val net = remember { NetActions(vm::applyFixedIp) }
                     val fw = FwActions(fwUi, vm::fwCheck, vm::fwUpdate, { pickFirmware.launch(arrayOf("*/*")) }, vm::fwReset)
                     ScaleScreen(
                         s = s,
                         fw = fw,
                         snd = snd,
+                        net = net,
                         onTare = vm::tare,
                         cal = cal,
                         onHost = vm::setHost,
@@ -139,6 +141,7 @@ fun ScaleScreen(
     s: ScaleState,
     fw: FwActions,
     snd: SoundActions,
+    net: NetActions,
     onTare: () -> Unit,
     cal: CalActions,
     onHost: (String) -> Unit,
@@ -198,7 +201,7 @@ fun ScaleScreen(
             s, { showSettings = false }, cal, onWizard = { showSettings = false; showWizard = true },
             onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
             onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
-            onRestart = onRestart, onFactoryReset = onFactoryReset, fw = fw, snd = snd,
+            onRestart = onRestart, onFactoryReset = onFactoryReset, fw = fw, snd = snd, net = net,
         )
     }
     if (showWizard) CalibrationWizard(s, cal) { showWizard = false }
@@ -263,6 +266,7 @@ private fun SettingsDialog(
     onFactoryReset: () -> Unit,
     fw: FwActions,
     snd: SoundActions,
+    net: NetActions,
 ) {
     var showScale by remember { mutableStateOf(false) }
     var showFw by remember { mutableStateOf(false) }
@@ -296,7 +300,7 @@ private fun SettingsDialog(
     if (showSound) SoundDialog(s, snd) { showSound = false }
     if (showScale) ScaleDialog(s, { showScale = false }, onSearch, { showHost = true }, onPickScale, onForget)
     if (showLang) LanguageDialog { showLang = false }
-    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi)
+    if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi, net.applyFixed)
     if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
     if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
@@ -418,7 +422,9 @@ private fun WifiDialog(
     onDismiss: () -> Unit,
     onScan: () -> Unit,
     onOk: (String, String) -> Unit,
+    onFixedIp: (FixedIp) -> Unit,
 ) {
+    val form = remember { FixedIpForm(s.sipOn, s.sipIp, s.sipGw, s.sipMask, s.sipDns) }
     var ssid by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
@@ -463,6 +469,7 @@ private fun WifiDialog(
                         }
                     },
                 )
+                FixedIpSection(form, s, onApplyOnly = { onFixedIp(form.toFixedIp()) })
                 if (s.wifiNeedsBoot) {
                     Text(
                         stringResource(R.string.wifi_needs_boot),
@@ -477,7 +484,13 @@ private fun WifiDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (ssid.isNotBlank()) { attempted = true; onOk(ssid, pass) } }) { Text(stringResource(R.string.btn_connect)) }
+            TextButton(onClick = {
+                if (ssid.isNotBlank() && form.valid()) {
+                    if (form.differsFrom(s)) onFixedIp(form.toFixedIp())   // the address first, then the credentials
+                    attempted = true
+                    onOk(ssid, pass)
+                }
+            }) { Text(stringResource(R.string.btn_connect)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) } },
     )
