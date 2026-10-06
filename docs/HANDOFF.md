@@ -111,6 +111,19 @@ One PN532, no servo, no screen, no battery. Optional buzzer: signal on **GPIO 26
   across a reboot. **Not heard yet: no buzzer was wired**, and the tag and send triggers were not exercised.
 - **Wi-Fi diagnostics in the boot log**: the saved network, the association (SSID and channel), `got IP`, every
   disconnect with its reason name, and a line every 10 s while there is no IP (`[WIFI] ...`).
+- **Fixed IP address** for a router that never answers the scale's DHCP (see the first open item). In the app:
+  Settings > WiFi, the switch "Use a fixed IP address" (IP, gateway, mask, optional DNS; "Fill in from this phone's
+  Wi-Fi" copies the gateway, mask and DNS of the phone's network and suggests an address at the top of the subnet,
+  to be checked against the router's DHCP range; "Apply address only" sends just the address). Connect sends the
+  address first and the credentials after it (BLE takes one write at a time and the app keeps a 900 ms gap). On the
+  scale: the encrypted BLE command `{"cmd":"ip_set","en":true,"ip":..,"gw":..,"mask":..,"dns":..}` validates the
+  addresses (contiguous mask no longer than /30, IP and gateway on the same subnet, not the network or broadcast
+  address; an empty DNS means the gateway), saves them in NVS (`sip_on`, `sip_ip`, `sip_gw`, `sip_mask`, `sip_dns`),
+  applies them with `WiFi.config()` and reconnects; `en:false` goes back to DHCP. Like any change of network it needs
+  BOOT pressed in the last 30 s when Wi-Fi is already up (`ip_err` = `boot` or `addr` otherwise). The scale reports
+  `sip`, `sip_ip`, `sip_gw`, `sip_mask`, `sip_dns`, and the app follows the address the scale reports over BLE as the
+  one to connect to. Boot log: `[WIFI] fixed IP a.b.c.d, gateway ..`. **Tested on the original board: 192.168.1.248,
+  `got IP` 1.6 s after boot, cloud, HTTP (ping 9-105 ms), and it survives a reboot.**
 - Wi-Fi and TigerTag account dialogs: show/hide password, and each closes by itself once the scale is connected to
   the chosen network / signed in to the account (a failed attempt keeps it open with the error).
 
@@ -121,16 +134,18 @@ counts/g when the stored factor is below 50, because this scale held 0.072 befor
 the zero check impossible to pass. The cloud account used here is a test account, so the inventory values written
 during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do not matter.
 
-1. **Wi-Fi: at one location the scale associated with the router but never got an IP.** Seen on 2026-10-06, same
-   scale, same saved network (`Atome3D`, channel 1, 2.4 GHz): `[WIFI] associated` then `no IP yet` for as long as it
-   was watched (100 s), cloud and HTTP dead; the old address (`192.168.1.174`) now belonged to another device.
-   Ruled out: the saved password and the network (a **static IP made everything work**: IP, cloud, HTTP), Wi-Fi power
-   save (`WiFi.setSleep(false)` did not help), the DHCP hostname (a short one failed too) and retrying the connection
-   (6 tries, all without an answer). So the router does not answer the scale's DHCP requests: look in the router's
-   device list and DHCP reservations for the scale's MAC (`34:98:7A:B0:06:68`, base of the `tigerscalelite-XXXX`
-   name: a stale reservation or a block), or restart the router. I could not sniff the DHCP exchange (packet
-   capture needs administrator rights). If it keeps happening on a router the owner cannot fix, the fallback is a
-   fixed IP that can be set from the app (not built).
+1. **Wi-Fi: with this router the scale associates but never gets an IP by DHCP. Worked around with a fixed IP.**
+   Seen on 2026-10-06 (saved network `Atome3D`, channel 1, 2.4 GHz): `[WIFI] associated` then `no IP yet` for as long
+   as it was watched, cloud and HTTP dead, and the address the scale had before (`192.168.1.174`) now belonged to
+   another device. **A second, different board (ESP32-D0WD-V3, MAC `28:05:a5:6a:20:6c`, clean DHCP history) did exactly
+   the same**, so it is the router's DHCP and not the board or a stale reservation of one MAC. Also ruled out: the
+   password and the network (a static IP made everything work), Wi-Fi power save (`WiFi.setSleep(false)`), the DHCP
+   hostname (a short one failed too) and retrying the connection (6 tries). Most likely the router's DHCP does not
+   serve 2.4 GHz clients (the PC on the same SSID is on 5 GHz, channel 36); to confirm it, check the router
+   (`http://192.168.1.254`): DHCP and isolation settings of the 2.4 GHz band, a guest/IoT mode, a device limit, or
+   restart it; or connect the scale to a phone hotspot and see whether it gets an address there. I could not sniff
+   the DHCP exchange (packet capture needs administrator rights). Until then the fixed IP above is the way to connect:
+   pick an address outside the router's DHCP range and not used by another device.
 2. **The buzzer is untested with real hardware**: wire a passive buzzer to GPIO 26 (or choose another pin in
    Settings > Sound) and use "Test sound", then a real tag and a real send.
 3. **Main-loop latency: two causes fixed, extended real-world use not yet measured.**
@@ -187,8 +202,10 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
   passes, `slow pass N ms: <section>=ms ...` = which section of `loop()` took the time (cmds, wifi, fbpub, scale,
   rfid, status, ws, wsclean, ble, delay), `outside loop() N ms` = time in the scheduler, not in our code. `[WIFI]`
   also covers association, IP and disconnect reasons, and `[BUZ] pin N, level N` the buzzer settings.
-- The ESP32's COM number changes when it is unplugged and plugged again (it was COM15, then COM14): read it from
-  Device Manager (CH340) before flashing.
+- The ESP32's COM number changes when it is unplugged and plugged again (COM15, COM14, COM17 so far): read it from
+  Device Manager (CH340) before flashing. Two boards have been used: the original (`34:98:7a:b0:06:68`, name
+  `tigerscalelite-0668`) and a spare (`28:05:a5:6a:20:6c`, `tigerscalelite-206C`). Flashing does not erase the NVS, so
+  a board keeps whatever Wi-Fi network, account and calibration it had (the spare came with an old network, `SFR_98BF`).
 - To find what blocks the loop: leave a timestamped serial logger running (a PowerShell `SerialPort` loop appending
   to a file) while using the scale, then grep `LOOP`. It held the COM port, so stop it before flashing.
 - The phone holds the scale's BLE link, which hides it from other BLE clients: close the app before testing from a PC.
