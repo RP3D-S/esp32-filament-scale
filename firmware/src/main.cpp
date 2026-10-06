@@ -4,6 +4,7 @@
 // TigerScale V3 API (docs/API.md) for the fields it shares, plus a few additions.
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncJson.h>
@@ -1115,6 +1116,32 @@ void setup() {
     WiFi.setHostname(n);
     WiFi.setAutoReconnect(true);
     WiFi.persistent(true);
+    // Say what the Wi-Fi is doing: without this a failed connection is silent. A disconnect reason of
+    // NO_AP_FOUND means the SSID is not on 2.4 GHz range, AUTH_FAIL / 4WAY_HANDSHAKE_TIMEOUT a wrong
+    // password or an unsupported security mode (the ESP32 does 2.4 GHz only, WPA3-only will not work).
+    WiFi.onEvent([](arduino_event_id_t ev, arduino_event_info_t info) {
+        switch (ev) {
+        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+            Serial.printf("[WIFI] associated with %.32s on channel %u\n",
+                          (const char *)info.wifi_sta_connected.ssid, (unsigned)info.wifi_sta_connected.channel);
+            break;
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+            Serial.printf("[WIFI] got IP %s\n", WiFi.localIP().toString().c_str());
+            break;
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+            Serial.printf("[WIFI] disconnected from %.32s, reason %u (%s)\n",
+                          (const char *)info.wifi_sta_disconnected.ssid, (unsigned)info.wifi_sta_disconnected.reason,
+                          WiFi.disconnectReasonName((wifi_err_reason_t)info.wifi_sta_disconnected.reason));
+            break;
+        default: break;
+        }
+    });
+    {
+        wifi_config_t conf;
+        if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK)
+            Serial.printf("[WIFI] saved network: '%.32s' (%s)\n", (const char *)conf.sta.ssid,
+                          conf.sta.ssid[0] ? "will connect" : "none saved: configure it from the app");
+    }
     pinMode(BOOT_BTN, INPUT_PULLUP);
     Serial.printf("[HEAP] before BLE %u\n", (unsigned)ESP.getFreeHeap());
     setupBle();
@@ -1189,6 +1216,14 @@ void loop() {
         WiFi.begin(pendSsid.c_str(), pendPass.c_str());
         wifiAttemptUntil = millis() + 20000;
         wifiFailed = false;
+    }
+    {   // associated but no IP yet is silent otherwise: say so every 10 s
+        static uint32_t lastNoIpLog = 0;
+        if (WiFi.status() != WL_CONNECTED && millis() - lastNoIpLog > 10000) {
+            lastNoIpLog = millis();
+            Serial.printf("[WIFI] no IP yet, status %d (3 connected, 6 disconnected/waiting for DHCP)\n", (int)WiFi.status());
+
+        }
     }
     if (wifiAttemptUntil) {
         if (WiFi.status() == WL_CONNECTED) wifiAttemptUntil = 0;
