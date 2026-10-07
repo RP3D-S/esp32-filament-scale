@@ -147,8 +147,30 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // Same scheme for the spool's inventory photo: {"spa":N,"spi":i,"spd":"..."}; {"spa":0} = none.
+    private var spoolImgParts: Array<String?> = emptyArray()
+
+    @Synchronized
+    private fun onSpoolImageChunk(j: JSONObject) {
+        val n = j.optInt("spa", -1)
+        if (n == 0) {
+            spoolImgParts = emptyArray()
+            _state.update { it.copy(spoolImageUrl = "") }
+            return
+        }
+        val i = j.optInt("spi", -1)
+        if (n < 0 || i !in 0 until n) return
+        if (spoolImgParts.size != n) spoolImgParts = arrayOfNulls(n)
+        spoolImgParts[i] = j.optString("spd")
+        if (spoolImgParts.all { it != null }) {
+            val url = spoolImgParts.joinToString("")
+            _state.update { it.copy(spoolImageUrl = url) }
+        }
+    }
+
     private fun onFrame(frame: JSONObject) {
         if (frame.has("fba")) onAvatarChunk(frame)
+        if (frame.has("spa")) onSpoolImageChunk(frame)
         _state.update { it.merge(frame) }
         // Signed out (or switching accounts): no avatar may linger from the previous account.
         _state.update {

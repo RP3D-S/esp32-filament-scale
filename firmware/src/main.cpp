@@ -831,9 +831,8 @@ public:
         } else if (!strcmp(cmd, "fb_logout")) {
             fbLogout();
         } else if (!strcmp(cmd, "wifi_forget")) {
-            // Same rule as changing the network: with Wi-Fi up it needs BOOT pressed in the last 30 s.
-            bool allowed = WiFi.status() != WL_CONNECTED || (bootBtnMs && millis() - bootBtnMs < 30000);
-            if (!allowed) { bleSend("{\"wifi_err\":\"boot\"}"); return; }
+            // No BOOT press needed: forgetting only disconnects, so the scale can be pointed at another network.
+            // Joining a new network (the "wifi" command) still follows the BOOT rule while Wi-Fi is up.
             pendWifiForget = true;
         } else if (!strcmp(cmd, "ip_set")) {
             // Same rule as changing the network: with Wi-Fi up it needs BOOT pressed in the last 30 s.
@@ -927,6 +926,18 @@ static void enqueueAvatar(const String &url) {
     }
 }
 
+// The spool's photo URL, like the avatar: {"spa":N,"spi":i,"spd":"..."}; {"spa":0} means "no photo".
+static void enqueueSpoolImage(const String &url) {
+    if (url.isEmpty()) { bleEnqueue("{\"spa\":0}"); return; }
+    const int CH = 100;
+    int n = (url.length() + CH - 1) / CH;
+    for (int i = 0; i < n; i++) {
+        StaticJsonDocument<256> d;
+        d["spa"] = n; d["spi"] = i; d["spd"] = url.substring(i * CH, min((int)url.length(), (i + 1) * CH));
+        String out; serializeJson(d, out); bleEnqueue(out);
+    }
+}
+
 static void pumpBle(bool periodicFull) {
     if (!bleStateChr || bleClients == 0) {
         bleState = FrameState(); bleNetState = FrameState(); bleRf = RfState(); bleCal = CalState(); bleOta = OtaState(); bleSnd = SndState(); bleIp = IpState(); bleSaved = SavedNetState();
@@ -996,6 +1007,10 @@ static void pumpBle(bool periodicFull) {
     static String lAva = "\x01";
     String ava = fbAvatarUrl();
     if (full || ava != lAva) { lAva = ava; enqueueAvatar(ava); }
+
+    static String lSpImg = "\x01";
+    String spImg = fbSpool().imageUrl;
+    if (full || spImg != lSpImg) { lSpImg = spImg; enqueueSpoolImage(spImg); }
 
     bleFlushOne();
 }

@@ -306,7 +306,7 @@ static bool fetchProfile() {
 // Streamed line by line like the profile, so the document size does not matter.
 class SpoolScanner : public Stream {
 public:
-    String line, lastKey, rackId, rackName, posLabel, twin;
+    String line, lastKey, rackId, rackName, posLabel, twin, imageUrl;
     long container = -1, level = -1, position = -1, weightAvail = -1;
     size_t write(uint8_t c) override {
         if (c == '\n') { process(); line = ""; }
@@ -342,7 +342,8 @@ private:
             else if (lastKey == "position") position = n;
             else if (lastKey == "weight_available") weightAvail = n;
         } else if (t.startsWith("\"stringValue\"")) {
-            if (lastKey == "id") rackId = v;
+            if (lastKey == "url_img" && v.startsWith("https://")) imageUrl = v;   // the spool's photo
+            else if (lastKey == "id") rackId = v;
             else if (isNameKey(lastKey) && rackName.isEmpty()) rackName = v;
             else if (lastKey == "position_label" || lastKey == "positionLabel") posLabel = v;
             else if (lastKey == "twin_tag_uid") { twin = v; twin.toUpperCase(); twin.replace(":", ""); twin.replace(" ", ""); }
@@ -368,7 +369,7 @@ static void fetchSpool(const String &uidHex) {
     SpoolScanner sc;
     int code = -1;
     if (!streamGet(base + "/inventory/" + uidHex +
-                   "?mask.fieldPaths=container_weight&mask.fieldPaths=weight_available&mask.fieldPaths=rack&mask.fieldPaths=twin_tag_uid", sc, code) || code != 200) {
+                   "?mask.fieldPaths=container_weight&mask.fieldPaths=weight_available&mask.fieldPaths=rack&mask.fieldPaths=twin_tag_uid&mask.fieldPaths=url_img", sc, code) || code != 200) {
         Serial.printf("[FB] inventory %s -> HTTP %d (not in the inventory or unreachable)\n", uidHex.c_str(), code);
         FbSpool none;
         none.fetched = true;        // looked it up: not there
@@ -390,9 +391,11 @@ static void fetchSpool(const String &uidHex) {
     s.rackName = rackName;
     s.rackPos = pos;
     s.twin = sc.twin;
+    s.imageUrl = sc.imageUrl;
     s.fetched = true;
-    Serial.printf("[FB] inventory %s: container=%d g rack='%s' pos='%s' twin=%s weight_available(now)=%ld\n", uidHex.c_str(),
-                  s.container, rackName.c_str(), pos.c_str(), sc.twin.c_str(), sc.weightAvail);
+    Serial.printf("[FB] inventory %s: container=%d g rack='%s' pos='%s' twin=%s weight_available(now)=%ld image=%s\n", uidHex.c_str(),
+                  s.container, rackName.c_str(), pos.c_str(), sc.twin.c_str(), sc.weightAvail,
+                  s.imageUrl.length() ? s.imageUrl.c_str() : "(none)");
     xSemaphoreTake(gLock, portMAX_DELAY); gSpool = s; xSemaphoreGive(gLock);
 }
 

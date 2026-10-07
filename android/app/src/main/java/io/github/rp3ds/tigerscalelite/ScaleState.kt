@@ -37,6 +37,8 @@ data class ScaleState(
     val container: Int = -1,
     val rackName: String = "",
     val rackPos: String = "",
+    /** Photo of the spool in the account's inventory (https URL, empty when the tag is not in it or has none) */
+    val spoolImageUrl: String = "",
     val avatarColor: String = "",
     /** RFID test screen: RF power level 0..4, test mode on, last UID read, PN532 version */
     val rfPow: Int = 3,

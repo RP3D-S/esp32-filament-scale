@@ -187,6 +187,7 @@ fun ScaleScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ScaleDisplay(s, onTare = onTare, onSettings = { showSettings = true })
+            SpoolPhoto(s)
             s.message?.let {
                 Text(it, color = Color(0xFFF2B705), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp))
             }

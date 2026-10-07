@@ -50,6 +50,7 @@ struct FbSpool {
     String rackPos;          // e.g. "A3": level letter + position
     bool   fetched = false;  // the lookup for the current tag has finished (found or not)
     String twin;             // the spool's other tag, empty when none
+    String imageUrl;         // the spool's photo in the inventory (https URL), empty when it has none
 };
 FbSpool fbSpool();
 
