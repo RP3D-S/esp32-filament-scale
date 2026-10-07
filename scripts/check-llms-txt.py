@@ -44,11 +44,11 @@ TOLERANCE = 1000          # lines; the point is "roughly", not a running total
 def main():
     if not LLMS.exists():
         sys.exit("error: llms.txt is missing. This guard checked nothing.")
-    text = LLMS.read_text(errors="replace")
+    text = LLMS.read_text(encoding="utf-8", errors="replace")
     problems = []
 
     # --- environments -------------------------------------------------------
-    real = set(re.findall(r"^\[env:([a-z0-9_]+)\]", PIO.read_text(), re.M))
+    real = set(re.findall(r"^\[env:([a-z0-9_]+)\]", PIO.read_text(encoding="utf-8"), re.M))
     if not real:
         sys.exit("error: no [env:...] sections found in platformio.ini. This guard "
                  "read nothing, which is a fault in the guard, not a pass.")
@@ -58,7 +58,7 @@ def main():
                             f"platformio.ini does not define")
 
     # CLAUDE.md's env table is where "bench-verified" is decided.
-    m = re.search(r"^\|\s*`([a-z0-9_]+)`\s*\|.*bench-verified\s*\|", CLAUDE.read_text(), re.M)
+    m = re.search(r"^\|\s*`([a-z0-9_]+)`\s*\|.*bench-verified\s*\|", CLAUDE.read_text(encoding="utf-8"), re.M)
     if not m:
         problems.append("CLAUDE.md no longer marks any environment bench-verified; "
                         "this guard cannot tell which one llms.txt should name")
@@ -71,7 +71,7 @@ def main():
                             f"this file is what an agent reads first")
 
     # --- size ---------------------------------------------------------------
-    actual = len(INO.read_text(errors="replace").splitlines())
+    actual = len(INO.read_text(encoding="utf-8", errors="replace").splitlines())
     stated = [int(v.replace(" ", "").replace(" ", ""))
               for v in re.findall(r"about ([0-9][0-9  ]{3,7})\s*lines", text)]
     if not stated:
@@ -91,7 +91,7 @@ def main():
 
     # --- freshness ----------------------------------------------------------
     cur = re.search(r'#define TIGERSCALE_FW_VERSION\s+"([^"]+)"',
-                    INO.read_text(errors="replace"))
+                    INO.read_text(encoding="utf-8", errors="replace"))
     if not cur:
         problems.append("TIGERSCALE_FW_VERSION not found in the firmware; this "
                         "guard cannot tell whether llms.txt is current")

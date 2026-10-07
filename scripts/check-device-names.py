@@ -53,7 +53,7 @@ NOT_A_NAME = {"tigerscale-v3"}          # product slug, see the docstring
 
 def declared_shape():
     """Read the construction out of the firmware rather than trusting this file."""
-    src = SOURCE.read_text(errors="replace")
+    src = SOURCE.read_text(encoding="utf-8", errors="replace")
     if 'String("tigerscale-") + macSuffix4()' not in src:
         sys.exit("error: the firmware no longer builds gMdnsName as "
                  '\'"tigerscale-" + macSuffix4()\'. Update this guard to match '
@@ -82,7 +82,7 @@ def main():
 
     bad = []
     for name in files:
-        for n, line in enumerate((ROOT / name).read_text(errors="replace").splitlines(), 1):
+        for n, line in enumerate((ROOT / name).read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             for hit in CANDIDATE.findall(line):
                 if hit in NOT_A_NAME or VALID.match(hit):
                     continue

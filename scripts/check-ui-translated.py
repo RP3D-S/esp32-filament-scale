@@ -94,7 +94,7 @@ def calls(src):
 
 
 def main():
-    src = INO.read_text(errors="replace")
+    src = INO.read_text(encoding="utf-8", errors="replace")
 
     sites = 0
     bad = []
