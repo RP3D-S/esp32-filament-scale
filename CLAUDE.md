@@ -90,13 +90,19 @@ bash scripts/bump-version.sh X.Y.Z   # version + scaffold release notes + change
 | file format check fails | a tracked text file is CRLF, carries a BOM, or contains an invisible/bidi control. It names the file and the line. `.gitattributes` already asks for LF, but that only binds a client's `git add` — a commit made through GitHub's web editor or API bypasses it, which is how a nine-line change once arrived as a 16,000-line diff |
 | release workflow refuses to publish | `docs/release-notes/v<version>.md` is missing or still holds the scaffold text |
 
-**Pushing needs the right GitHub account.** The repository belongs to the
-`TigerTag-Project` user, not to `BenGlut`, and a private-repo push from the wrong
-one fails with "Repository not found":
+**Check `git remote -v` before pushing; the account depends on it.**
 
-```bash
-gh auth switch -u TigerTag-Project && git push && gh auth switch -u BenGlut
-```
+- `TigerTag-Project/Tiger-Scale-V3` belongs to the `TigerTag-Project` user, not to
+  `BenGlut`, and a private-repo push from the wrong account fails with
+  "Repository not found":
+
+  ```bash
+  gh auth switch -u TigerTag-Project && git push && gh auth switch -u BenGlut
+  ```
+
+- `RP3D-S/esp32-filament-scale` (the remote of the headless-scale clone) takes a plain
+  `git push origin main` with the credentials already stored on the machine. No account
+  switch, and `gh` is not installed there.
 
 **Documentation and installer-page commits do not need a release.** The version
 belongs to the firmware, and moving it without moving the firmware is a claim
