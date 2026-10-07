@@ -1001,19 +1001,18 @@ static void pumpBle(bool periodicFull) {
 }
 
 // Scans for networks and sends the strongest few over BLE (fits one notification).
-static void doWifiScan() {
-    Serial.printf("[WIFI] scan start status=%d\n", (int)WiFi.status());
-    int n = WiFi.scanNetworks(false, false);
-    bool stopped = false;
-    if (n < 0) {   // WIFI_SCAN_FAILED: the radio refuses to scan while a connect attempt is in flight
-        Serial.printf("[WIFI] scan failed (%d), stopping reconnect and retrying\n", n);
-        WiFi.scanDelete();
-        WiFi.disconnect(false, false);   // keeps the saved credentials
-        stopped = true;
-        delay(500);
-        n = WiFi.scanNetworks(false, false);
-    }
-    Serial.printf("[WIFI] scan n=%d\n", n);
+//
+// Asynchronous: WiFi.scanNetworks() as a blocking call froze loop() for ~9 s while the scale was connected (the
+// radio visits every channel), and with it the weight. Now it starts the scan, and wifiScanTick() collects the
+// result on a later pass.
+enum { SC_IDLE = 0, SC_RETRY, SC_RUNNING };
+static int      scState = SC_IDLE;
+static uint32_t scAt = 0;                 // retry time while SC_RETRY, start time while SC_RUNNING
+static bool     scStopped = false;        // we stopped a connection attempt to make room for the scan: resume it after
+static const uint32_t SCAN_TIMEOUT_MS = 20000;
+
+static void wifiScanFinish(int n) {
+    Serial.printf("[WIFI] scan n=%d in %u ms\n", n, (unsigned)(millis() - scAt));
     // ArduinoJson copies each String into the pool (~16 B slot + text), so 8 SSIDs
     // overflowed the old 256 B and the later ones were dropped silently.
     StaticJsonDocument<512> d;
@@ -1031,9 +1030,51 @@ static void doWifiScan() {
         used += name.length() + 4;
     }
     WiFi.scanDelete();
-    if (stopped && !pendWifi) WiFi.begin();   // resume the saved network
+    if (scStopped && !pendWifi) WiFi.begin();   // resume the saved network
+    scStopped = false;
+    scState = SC_IDLE;
     String out; serializeJson(d, out);
     bleSend(out);
+}
+
+static void startWifiScan() {
+    if (scState != SC_IDLE) return;                     // one scan at a time
+    Serial.printf("[WIFI] scan start status=%d\n", (int)WiFi.status());
+    if (WiFi.scanNetworks(true, false) == WIFI_SCAN_FAILED) {   // the radio refuses while a connect attempt is in flight
+        Serial.println("[WIFI] scan refused, stopping the reconnect and retrying");
+        WiFi.scanDelete();
+        WiFi.disconnect(false, false);                  // keeps the saved credentials
+        scStopped = true;
+        scState = SC_RETRY;
+        scAt = millis() + 500;                          // give the stack a moment, without waiting for it
+        return;
+    }
+    scState = SC_RUNNING;
+    scAt = millis();
+}
+
+/** Advances the scan; call every loop() pass. */
+static void wifiScanTick() {
+    if (scState == SC_IDLE) return;
+    uint32_t now = millis();
+    if (scState == SC_RETRY) {
+        if ((int32_t)(now - scAt) < 0) return;
+        if (WiFi.scanNetworks(true, false) == WIFI_SCAN_FAILED) {
+            Serial.println("[WIFI] scan could not start");
+            WiFi.scanDelete();
+            wifiScanFinish(0);
+            return;
+        }
+        scState = SC_RUNNING;
+        scAt = now;
+        return;
+    }
+    int n = WiFi.scanComplete();                        // WIFI_SCAN_RUNNING (-1) until it has finished
+    if (n == WIFI_SCAN_RUNNING) {
+        if (now - scAt > SCAN_TIMEOUT_MS) { Serial.println("[WIFI] scan timed out"); WiFi.scanDelete(); wifiScanFinish(0); }
+        return;
+    }
+    wifiScanFinish(n < 0 ? 0 : n);
 }
 
 static void onWsEvent(AsyncWebSocket *s, AsyncWebSocketClient *c, AwsEventType t,
@@ -1392,7 +1433,8 @@ void loop() {
         prefs.begin("scale", false); prefs.putUChar("rfpow", rfPow); prefs.end();
         reader.applyRfPower(rfPow);
     }
-    if (pendScan)           { pendScan = false; doWifiScan(); }
+    if (pendScan)           { pendScan = false; startWifiScan(); }
+    wifiScanTick();
     if (pendWifi) {
         pendWifi = false;
         WiFi.disconnect(false, false);
