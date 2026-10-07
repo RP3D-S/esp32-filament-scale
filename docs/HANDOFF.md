@@ -101,7 +101,12 @@ One PN532, no servo, no screen, no battery. Optional buzzer: signal on **GPIO 26
   "Install from file": 0.2.0 -> 0.2.1 in 28.6 s of streaming, the scale came back on `app0` (it was on `app1`).
   Publish a release with `python firmware/scripts/release_firmware.py` (needs `gh`; it builds, writes
   `firmware/dist/firmware.{bin,json}` and creates `fw-v<version>`; `--dry-run` only writes the files). The release
-  source is `FirmwareUpdater.RELEASES_API`: change it if the GitHub repository is renamed.
+  source is `FirmwareUpdater.RELEASES_API`: change it if the GitHub repository is renamed. **The repository must be
+  public**: the app reads the releases API without a token, and a private repository answers 404.
+  **Online update verified on 2026-10-07** with release `fw-v0.3.0`: the app found it, downloaded it (SHA-256 checked),
+  sent it to the scale over Wi-Fi, and the scale came back on 0.3.0 (about 1 min end to end). It needs the BLE link: if
+  the app shows "Bluetooth connection with the scale required", the app holds a stale BLE link and the scale has
+  stopped advertising; force-stopping and reopening the app fixed it.
 - **Buzzer feedback** (`firmware/src/buzzer.cpp`; Settings > Sound in the app, `SoundDialog.kt`): a short beep when a
   tag is read (the same UID is not repeated within 8 s), two rising tones when the weight reached the cloud, a low
   tone when the send failed, three quick notes when the calibration is saved. Passive buzzer on LEDC PWM (tone =
@@ -198,12 +203,10 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    session, and treat every new client connection as costing contiguous heap that the cloud TLS needs.
 5. BLE link occasionally drops (supervision timeout, status 8; the app logs `ble link stale ... -> reconnect`) when
    Wi-Fi/TLS is busy; the app reconnects in ~3 s.
-6. **OTA: the online path is untested, and there is no rollback.** "Check for updates" and the download have not run
-   against a real release (none is published yet, and publishing is visible to everyone): publish one with
-   `release_firmware.py` and try it from the app. What the app shows on screen during an update was not seen by
-   me (I only had the scale console and the app log). There is no automatic rollback (the bootloader of this
-   platform is not built for it): a firmware that boots but is broken needs a USB flash. The scale never pulls from
-   GitHub itself: that needs TLS, and the heap cannot afford it.
+6. **OTA: there is no rollback.** The online path is verified (see the Firmware screen above). There is no automatic
+   rollback (the bootloader of this platform is not built for it): a firmware that boots but is broken needs a USB flash.
+   The scale never pulls from GitHub itself: that needs TLS, and the heap cannot afford it. The app does not reconnect
+   BLE by itself after a stale link (see above): worth making it retry or say so.
 7. Not ported from the original: second NFC reader, servo, battery/PMIC, web UI from `data/www`,
    rack/position editing, language sync with the account.
 8. Debug logging to remove when done diagnosing: the firmware's `[LOOP]` timing (keep it cheap, it only prints on slow
@@ -211,18 +214,22 @@ during early testing (e.g. spool pair `1D6EAB64121080` / `1D77F85F121080`) do no
    only sends a keep-alive every 2 s when nothing changes, so ~2 s gaps are normal.
 
 ## Where things stand (updated 2026-10-07, to resume from another PC)
-- Everything is committed and pushed except the asynchronous Wi-Fi scan, committed with this update. Firmware on the bench
-  boards: 0.2.1 (the version string was not bumped for the later features). The original board (`34:98:7a:b0:06:68`,
-  `tigerscalelite-0668`) is now joined to **`ESP32-USB-AP`** (192.168.4.2, DHCP, cloud connected): the owner moved it
-  there with Forget network. The PC on `Atome3D` (192.168.1.x) cannot reach it, so OTA from that PC is not possible
-  until it is back on a network that PC shares; use USB meanwhile. Buzzer on GPIO 26 works. The spare board
-  (`28:05:a5:6a:20:6c`, `tigerscalelite-206C`) is flashed but set up for nothing.
-- To update a board without a cable: `python firmware/scripts/ota_push.py <scale-ip>` (needs `firmware/.ota_password` from
-  the PC that flashed it; copy that file, it is not in git). On a new PC without it, flash once by USB
-  (`pio run -e esp32dev_hsu -t upload --upload-port COMx`) and that PC's password takes over.
+- Everything is committed and pushed. The repository `RP3D-S/esp32-filament-scale` is now **public** (its history was
+  checked first: no password, token or key beyond the public Firebase web key; the OTA password is git-ignored). Release
+  `fw-v0.3.0` is published (`firmware.bin` + `firmware.json`). The original board (`34:98:7a:b0:06:68`,
+  `tigerscalelite-0668`) runs **0.3.0**, installed from the app through the online path. It is joined to
+  **`ESP32-USB-AP`** (192.168.4.2, DHCP, cloud connected; the phone is on the same network). The PC on `Atome3D`
+  (192.168.1.x) cannot reach it, so OTA from that PC is not possible until it shares a network with the scale; use USB
+  meanwhile. Buzzer on GPIO 26 works. The spare board (`28:05:a5:6a:20:6c`, `tigerscalelite-206C`) is flashed but set up
+  for nothing, and still runs 0.2.1.
+- To publish the next version: bump `-DFW_VERSION` in `firmware/platformio.ini`, commit and push, then
+  `python firmware/scripts/release_firmware.py` (needs `gh`, logged in as `RP3D-S`; on this PC it is the portable copy in
+  `%LOCALAPPDATA%\Programs\gh\bin`, not on PATH). Check first with `--dry-run`.
+- To update a board without a cable: the app (Settings > Firmware), or `python firmware/scripts/ota_push.py <scale-ip>`
+  (needs `firmware/.ota_password` from the PC that flashed it; copy that file, it is not in git). On a new PC without it,
+  flash once by USB (`pio run -e esp32dev_hsu -t upload --upload-port COMx`) and that PC's password takes over.
 - The app: uninstall `io.github.rp3ds.tigerscalelite` first on a new PC (different debug key), then install.
-- Next steps: the open items above (use the scale for a while watching `[LOOP]` and `heartbeat HTTP`), then publish a
-  release to try the online firmware update.
+- Next steps: the open items above (use the scale for a while watching `[LOOP]` and `heartbeat HTTP`).
 
 ## Handy
 - Wireless adb (no cable): `adb tcpip 5555`, `adb connect <phone-ip>:5555`.
