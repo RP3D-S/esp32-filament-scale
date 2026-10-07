@@ -48,7 +48,7 @@ ULIST     = re.compile(r"static const uint16_t unicode_list_0\[\]\s*=\s*\{(.*?)\
 
 
 def check_bitmap(path, problems):
-    text = path.read_text(errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
     dims = {m.group(2): int(m.group(3)) for m in DIM.finditer(text)}
     arr  = ARRAY.search(text)
     if not arr or "W" not in dims or "H" not in dims:
@@ -87,7 +87,7 @@ def declared_codepoints(opts):
 
 
 def check_font(path, problems):
-    text = path.read_text(errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
     m = OPTS.search(text)
     if not m:
         problems.append(f"{path.name}: no 'Opts:' line - lv_font_conv records the "
