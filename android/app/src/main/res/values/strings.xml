@@ -62,6 +62,9 @@
     <string name="acct_sends">The scale sends its weight and status to your account every 30 seconds.</string>
     <string name="acct_intro">Email and password of your TigerTag account. Accounts created only with Google have no password.</string>
     <string name="acct_pair_hint">The first time, Android asks to pair with the scale; accept.</string>
+    <string name="acct_qr_button">Connect with QR code</string>
+    <string name="acct_qr_scan">Scan this code with another device, or open the approval page below.</string>
+    <string name="acct_qr_open">Open approval page on this phone</string>
     <string name="acct_needs_boot">The scale already has an account. Press the BOOT button on the ESP32 and try again (30 s).</string>
     <string name="acct_cannot">Could not connect.</string>
     <string name="host_title">Scale address</string>

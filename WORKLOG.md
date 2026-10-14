@@ -17,3 +17,9 @@ Reset this file to the header above at each checkpoint. Nothing is lost: the raw
 log lives in git history and the synthesised entry lives in the changelog.
 
 ---
+
+## 2026-10-14
+
+### Added
+- Added the TigerTag QR account-pairing flow to the ESP32 and Android app, keeping the polling token on the device and displaying the approval QR/code in Settings; updated `firmware/src/firebase.cpp`, `firmware/src/firebase.h`, `firmware/src/main.cpp`, Android account UI/state/resources, and `docs/ACCOUNT-PAIRING.md`.
+- Added PlatformIO ESP32-S3 N16R8 build and OTA environments, an S3-safe peripheral pin map, and wiring/build notes in `firmware/platformio.ini`, `firmware/src/main.cpp`, `firmware/src/buzzer.cpp`, `firmware/src/buzzer.h`, `firmware/README.md`, and `docs/WROOM32_PORT.md`.

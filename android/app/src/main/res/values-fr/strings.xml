@@ -62,6 +62,9 @@
     <string name="acct_sends">La balance envoie son poids et son état à votre compte toutes les 30 secondes.</string>
     <string name="acct_intro">E-mail et mot de passe de votre compte TigerTag. Les comptes créés uniquement avec Google n\'ont pas de mot de passe.</string>
     <string name="acct_pair_hint">La première fois, Android demande de s\'appairer avec la balance ; acceptez.</string>
+    <string name="acct_qr_button">Connexion par code QR</string>
+    <string name="acct_qr_scan">Scannez ce code avec un autre appareil ou ouvrez la page d’approbation ci-dessous.</string>
+    <string name="acct_qr_open">Ouvrir la page d’approbation sur ce téléphone</string>
     <string name="acct_needs_boot">La balance a déjà un compte. Appuyez sur le bouton BOOT de l\'ESP32 et réessayez (30 s).</string>
     <string name="acct_cannot">Connexion impossible.</string>
     <string name="host_title">Adresse de la balance</string>

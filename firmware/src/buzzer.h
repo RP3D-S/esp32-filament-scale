@@ -6,12 +6,16 @@
 // so playing one never waits for it to finish.
 //
 // The pin is configurable: BUZZER_PIN at build time is the default, and buzzerConfigure() changes it (and the
-// volume) at run time; both are saved in NVS. Only pins that are safe as plain outputs on a WROOM-32 are accepted.
+// volume) at run time; both are saved in NVS. Only pins that are safe as plain outputs on the selected board are accepted.
 #pragma once
 #include <Arduino.h>
 
 #ifndef BUZZER_PIN
+#if defined(SCALE_BOARD_ESP32S3)
+#define BUZZER_PIN 6       // free on the ESP32-S3 pin map; -1 = no buzzer
+#else
 #define BUZZER_PIN 26      // free on the pin map in docs/WROOM32_PORT.md; -1 = no buzzer
+#endif
 #endif
 
 /** Loads the saved pin and volume (or the defaults) and starts the buzzer. Call once from setup(). */

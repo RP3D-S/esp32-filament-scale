@@ -1,4 +1,4 @@
-// Headless filament scale for ESP32 WROOM-32.
+// Headless filament scale for ESP32 WROOM-32 and ESP32-S3.
 // HX711 load cell + 1x PN532 (HSU).
 // State goes to the phone over HTTP + WebSocket; protocol mirrors the upstream
 // TigerScale V3 API (docs/API.md) for the fields it shares, plus a few additions.
@@ -25,11 +25,19 @@
 #endif
 
 // ---- Pins (see docs/WROOM32_PORT.md) --------------------------------------
+#if defined(SCALE_BOARD_ESP32S3)
+#define HX711_DOUT    4
+#define HX711_SCK     5
+#define PN532_RXD    16   // Serial2 (<- PN532 TXD)
+#define PN532_TXD    17
+#define PN532_RST    18
+#else
 #define HX711_DOUT   32
 #define HX711_SCK    33
 #define PN532_RXD    16   // Serial2 (<- PN532 TXD)
 #define PN532_TXD    17
 #define PN532_RST    27
+#endif
 
 #define BOOT_BTN    0    // Wi-Fi changes over BLE need this pressed (unless offline)
 
@@ -828,6 +836,10 @@ public:
             const char *email = d["email"] | "";
             const char *pass = d["pass"] | "";
             if (*email && *pass) fbLogin(email, pass);
+        } else if (!strcmp(cmd, "fb_pair")) {
+            bool allowed = fbState() != FB_SIGNED_IN || (bootBtnMs && millis() - bootBtnMs < 30000);
+            if (!allowed) { bleSend("{\"fb_err\":\"boot\"}"); return; }
+            fbPairStart();
         } else if (!strcmp(cmd, "fb_logout")) {
             fbLogout();
         } else if (!strcmp(cmd, "wifi_forget")) {
@@ -984,6 +996,13 @@ static void pumpBle(bool periodicFull) {
 
 
     if (fb.size()) { String out; serializeJson(fb, out); bleEnqueue(out); }
+
+    StaticJsonDocument<256> pair;
+    static String lastPairUrl, lastPairCode;
+    String pairUrl = fbPairUrl(), pairCode = fbPairCode();
+    putField<String>(pair, "fbu", pairUrl, lastPairUrl, full);
+    putField<String>(pair, "fbcod", pairCode, lastPairCode, full);
+    if (pair.size()) { String out; serializeJson(pair, out); bleEnqueue(out); }
 
     {
         StaticJsonDocument<192> sf;

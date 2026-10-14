@@ -13,6 +13,7 @@ import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -46,7 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,6 +62,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import java.util.Locale
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 
 class MainActivity : ComponentActivity() {
     private val vm: ScaleViewModel by viewModels()
@@ -120,6 +125,7 @@ class MainActivity : ComponentActivity() {
                         onScanWifi = vm::scanWifi,
                         onWifi = vm::configureWifi,
                         onFbLogin = vm::loginFirebase,
+                        onFbPair = vm::pairFirebase,
                         onFbLogout = vm::logoutFirebase,
                         onRfidTest = vm::rfidTest,
                         onRfPower = vm::rfPower,
@@ -149,6 +155,7 @@ fun ScaleScreen(
     onScanWifi: () -> Unit,
     onWifi: (String, String) -> Unit,
     onFbLogin: (String, String) -> Unit,
+    onFbPair: () -> Unit,
     onFbLogout: () -> Unit,
     onRfidTest: (Boolean) -> Unit,
     onRfPower: (Int) -> Unit,
@@ -200,7 +207,7 @@ fun ScaleScreen(
     if (showSettings) {
         SettingsDialog(
             s, { showSettings = false }, cal, onWizard = { showSettings = false; showWizard = true },
-            onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbLogout,
+            onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbPair, onFbLogout,
             onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
             onRestart = onRestart, onFactoryReset = onFactoryReset, fw = fw, snd = snd, net = net,
         )
@@ -258,6 +265,7 @@ private fun SettingsDialog(
     onScanWifi: () -> Unit,
     onWifi: (String, String) -> Unit,
     onFbLogin: (String, String) -> Unit,
+    onFbPair: () -> Unit,
     onFbLogout: () -> Unit,
     onRfidTest: (Boolean) -> Unit,
     onRfPower: (Int) -> Unit,
@@ -303,7 +311,7 @@ private fun SettingsDialog(
     if (showLang) LanguageDialog { showLang = false }
     if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi, net.applyFixed, net.forgetWifi)
     if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
-    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbLogout)
+    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbPair, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
     if (showManual) ManualFactorDialog(s.calibration, { showManual = false }) { cal.factor(it); showManual = false }
 }
@@ -532,8 +540,10 @@ private fun FirebaseDialog(
     s: ScaleState,
     onDismiss: () -> Unit,
     onLogin: (String, String) -> Unit,
+    onPair: () -> Unit,
     onLogout: () -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
     var email by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
@@ -546,6 +556,18 @@ private fun FirebaseDialog(
             onDismiss()
         }
     }
+    val qrBitmap = remember(s.fbPairUrl) {
+        s.fbPairUrl.takeIf { it.isNotBlank() }?.let { url ->
+            runCatching {
+                val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, 480, 480)
+                android.graphics.Bitmap.createBitmap(480, 480, android.graphics.Bitmap.Config.ARGB_8888).also { bitmap ->
+                    for (y in 0 until 480) for (x in 0 until 480) {
+                        bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                    }
+                }.asImageBitmap()
+            }.getOrNull()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.acct_title)) },
@@ -556,28 +578,28 @@ private fun FirebaseDialog(
                     Text(s.fbEmail, fontSize = 13.sp, color = Color(0xFF8A93A6))
                     Text(stringResource(R.string.acct_sends), fontSize = 13.sp)
                 } else {
-                    Text(
-                        stringResource(R.string.acct_intro),
-                        fontSize = 13.sp,
-                    )
-                    OutlinedTextField(
-                        value = email, onValueChange = { email = it }, singleLine = true,
-                        label = { Text(stringResource(R.string.email)) },
-                    )
-                    OutlinedTextField(
-                        value = pass, onValueChange = { pass = it }, singleLine = true,
-                        label = { Text(stringResource(R.string.password)) },
-                        visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            TextButton(onClick = { showPass = !showPass }) {
-                                Text(stringResource(if (showPass) R.string.pw_hide else R.string.pw_show), fontSize = 12.sp)
-                            }
-                        },
-                    )
-                    Text(
-                        stringResource(R.string.acct_pair_hint),
-                        fontSize = 12.sp, color = Color(0xFF8A93A6),
-                    )
+                    if (s.fbPairUrl.isNotBlank()) {
+                        Text(stringResource(R.string.acct_qr_scan), fontSize = 13.sp)
+                        qrBitmap?.let { Image(it, contentDescription = "TigerTag pairing QR", modifier = Modifier.align(Alignment.CenterHorizontally).fillMaxWidth().padding(12.dp)) }
+                        Text(s.fbPairCode, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                        TextButton(onClick = { runCatching { uriHandler.openUri(s.fbPairUrl) } }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                            Text(stringResource(R.string.acct_qr_open))
+                        }
+                    } else {
+                        Text(stringResource(R.string.acct_intro), fontSize = 13.sp)
+                        OutlinedTextField(value = email, onValueChange = { email = it }, singleLine = true, label = { Text(stringResource(R.string.email)) })
+                        OutlinedTextField(
+                            value = pass, onValueChange = { pass = it }, singleLine = true,
+                            label = { Text(stringResource(R.string.password)) },
+                            visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                TextButton(onClick = { showPass = !showPass }) {
+                                    Text(stringResource(if (showPass) R.string.pw_hide else R.string.pw_show), fontSize = 12.sp)
+                                }
+                            },
+                        )
+                        Text(stringResource(R.string.acct_pair_hint), fontSize = 12.sp, color = Color(0xFF8A93A6))
+                    }
                 }
                 if (s.fbNeedsBoot) {
                     Text(
@@ -587,16 +609,21 @@ private fun FirebaseDialog(
                 }
                 when (s.fbState) {
                     1 -> Text(stringResource(R.string.connecting), color = Color(0xFF2F7FFF))
-                    3 -> Text(s.fbError.ifBlank { stringResource(R.string.acct_cannot) }, color = Color(0xFFE24B4A))
+                    3 -> Text(if (s.fbNeedsBoot) stringResource(R.string.acct_needs_boot) else s.fbError.ifBlank { stringResource(R.string.acct_cannot) }, color = Color(0xFFE24B4A))
                 }
             }
         },
         confirmButton = {
             if (s.fbState == 2) {
                 TextButton(onClick = { onLogout(); onDismiss() }) { Text(stringResource(R.string.logout)) }
+            } else if (s.fbPairUrl.isNotBlank()) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) }
+            } else if (s.fbState == 1) {
+                Text(stringResource(R.string.connecting))
             } else {
-                TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) { attempted = true; onLogin(email.trim(), pass) } }) {
-                    Text(stringResource(R.string.btn_connect))
+                Row {
+                    TextButton(onClick = onPair) { Text(stringResource(R.string.acct_qr_button)) }
+                    TextButton(onClick = { if (email.isNotBlank() && pass.isNotBlank()) { attempted = true; onLogin(email.trim(), pass) } }) { Text(stringResource(R.string.btn_connect)) }
                 }
             }
         },

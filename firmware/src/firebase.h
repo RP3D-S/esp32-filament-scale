@@ -33,6 +33,10 @@ void fbPublish(const FbSnapshot &s);
 
 /** Asynchronous; follow progress with fbState(). The password is never stored. */
 void fbLogin(const String &email, const String &password);
+/** Starts the original TigerTag QR device-pairing flow. */
+void fbPairStart();
+String fbPairUrl();
+String fbPairCode();
 void fbLogout();
 
 int    fbState();

@@ -17,9 +17,14 @@ static bool     gPlaying = false;
 static uint32_t gStepEnd = 0;
 
 bool buzzerPinAllowed(int pin) {
+#if defined(SCALE_BOARD_ESP32S3)
+    // GPIOs available in the ESP32-S3 N16R8 profile; avoid strapping, USB, flash/PSRAM and scale peripherals.
+    static const int OK[] = { 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 21, 38, 39, 40, 41, 42, 47, 48 };
+#else
     // Free outputs on the pin map (docs/WROOM32_PORT.md). Not allowed: 0/2/12/15 (strapping), 1/3 (USB serial),
     // 6-11 (flash), 16/17/27/32/33 (PN532 and HX711), 34-39 (input only).
     static const int OK[] = { 4, 13, 14, 18, 19, 21, 22, 23, 25, 26 };
+#endif
     for (int p : OK) if (p == pin) return true;
     return false;
 }

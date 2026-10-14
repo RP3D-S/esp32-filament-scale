@@ -62,6 +62,9 @@
     <string name="acct_sends">A balança envia o peso e o estado para a sua conta a cada 30 segundos.</string>
     <string name="acct_intro">E-mail e senha da sua conta TigerTag. Contas criadas só com o Google não têm senha.</string>
     <string name="acct_pair_hint">Na primeira vez o Android pede para parear com a balança; aceite.</string>
+    <string name="acct_qr_button">Ligar com código QR</string>
+    <string name="acct_qr_scan">Lê o código com outro dispositivo ou abre a página de aprovação abaixo.</string>
+    <string name="acct_qr_open">Abrir a página de aprovação neste telemóvel</string>
     <string name="acct_needs_boot">A balança já tem uma conta. Pressione o botão BOOT do ESP32 e tente de novo (30 s).</string>
     <string name="acct_cannot">Não foi possível conectar.</string>
     <string name="host_title">Endereço da balança</string>

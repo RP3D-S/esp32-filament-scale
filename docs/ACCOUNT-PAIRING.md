@@ -57,6 +57,16 @@ both ends: **the URL in the QR already carries the code.** Scan, approve, done.
 The owner is standing at the scale, so they scan a QR that is physically in front
 of them, and approve on a phone where they are usually already signed in.
 
+### Tiger Scale Lite (headless ESP32)
+
+Tiger Scale Lite uses the same `pairStart` / `pairPoll` cloud flow without a
+display. The Android app starts pairing over its encrypted BLE command, then
+shows the `verify_url` as a QR and the human-readable code. The app can open the
+approval URL on that same phone; the QR remains available for a second device.
+The ESP32 retains `poll_token`, polls the cloud, exchanges the returned custom
+token with Firebase Identity Toolkit, and stores the resulting refresh token in
+NVS. Only the approval URL and short code cross BLE to the app.
+
 ## The two endpoints
 
 ### `POST /api/device/pair/start`

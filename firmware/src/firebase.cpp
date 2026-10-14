@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
+#include <mbedtls/base64.h>
 
 // Public client key of the TigerTag Firebase project. It is not a secret: every Firebase
 // web client ships it (upstream documents the same).
@@ -42,6 +43,12 @@ static uint32_t gTokenMs = 0;
 
 static String gPendEmail, gPendPass;
 static volatile bool gPendLogin = false, gPendLogout = false;
+static volatile bool gPendPair = false;
+static String gPairUrl, gPairCode, gPairToken;
+static uint32_t gPairPollAt = 0, gPairExpires = 0;
+
+static const char *PAIR_START = "https://us-central1-tigertag-connect.cloudfunctions.net/pairStart";
+static const char *PAIR_POLL = "https://us-central1-tigertag-connect.cloudfunctions.net/pairPoll";
 
 static bool gTimeOk = false;
 
@@ -154,6 +161,95 @@ static bool signIn(const String &email, const String &pass) {
     gNeedProfile = true;
     gProfileTries = 0;
     return true;
+}
+
+static String uidFromIdToken(const String &jwt) {
+    int a = jwt.indexOf('.'), b = jwt.indexOf('.', a + 1);
+    if (a < 0 || b < 0) return "";
+    String payload = jwt.substring(a + 1, b);
+    payload.replace('-', '+'); payload.replace('_', '/');
+    while (payload.length() % 4) payload += '=';
+    uint8_t decoded[1536]; size_t length = 0;
+    if (mbedtls_base64_decode(decoded, sizeof(decoded) - 1, &length,
+            reinterpret_cast<const unsigned char *>(payload.c_str()), payload.length()) != 0) return "";
+    decoded[length] = 0;
+    StaticJsonDocument<64> filter; filter["user_id"] = true;
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, reinterpret_cast<char *>(decoded), DeserializationOption::Filter(filter))) return "";
+    return String(doc["user_id"] | "");
+}
+
+static bool signInCustomToken(const String &customToken, const String &email) {
+    StaticJsonDocument<1536> body;
+    body["token"] = customToken; body["returnSecureToken"] = true;
+    String b; serializeJson(body, b);
+    String resp;
+    String url = String("https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=") + API_KEY;
+    int code = request("POST", url, b, "application/json", "", resp);
+    if (code != 200) { gError = code < 0 ? "Sem ligação à internet" : friendlyError(resp); return false; }
+    StaticJsonDocument<96> filter;
+    filter["idToken"] = true; filter["refreshToken"] = true;
+    DynamicJsonDocument doc(2560);
+    if (deserializeJson(doc, resp, DeserializationOption::Filter(filter))) { gError = "Resposta inválida"; return false; }
+    gIdToken = String(doc["idToken"] | "");
+    gRefresh = String(doc["refreshToken"] | "");
+    gUid = uidFromIdToken(gIdToken);
+    gEmail = email;
+    gTokenMs = millis();
+    if (gIdToken.isEmpty() || gRefresh.isEmpty() || gUid.isEmpty()) { gError = "Resposta inválida"; return false; }
+    gName = ""; gColor = ""; gAvatar = "";
+    gProfileDocDone = gProfilePhotoDone = false;
+    gNeedProfile = true; gProfileTries = 0;
+    saveSession();
+    return true;
+}
+
+static bool startPairing() {
+    StaticJsonDocument<192> body;
+    body["device"] = String("tigerscalelite-") + gMac.substring(max(0, (int)gMac.length() - 4));
+    body["model"] = "Tiger Scale Lite"; body["kind"] = "scale";
+    body["fw"] = gSnap.fw;
+    String requestBody; serializeJson(body, requestBody);
+    String resp;
+    int code = request("POST", PAIR_START, requestBody, "application/json", "", resp);
+    if (code != 200) { gError = code < 0 ? "Sem ligação à internet" : "Não foi possível iniciar o QR"; return false; }
+    StaticJsonDocument<128> filter;
+    filter["verify_url"] = true; filter["code"] = true; filter["poll_token"] = true;
+    filter["interval"] = true; filter["expires_in"] = true;
+    DynamicJsonDocument doc(768);
+    if (deserializeJson(doc, resp, DeserializationOption::Filter(filter))) { gError = "Resposta QR inválida"; return false; }
+    gPairUrl = String(doc["verify_url"] | ""); gPairCode = String(doc["code"] | "");
+    gPairToken = String(doc["poll_token"] | "");
+    uint32_t seconds = doc["interval"] | 5;
+    gPairPollAt = millis() + max(1UL, seconds) * 1000UL;
+    gPairExpires = millis() + (uint32_t)(doc["expires_in"] | 600) * 1000UL;
+    if (gPairUrl.isEmpty() || gPairToken.isEmpty()) { gError = "Resposta QR incompleta"; return false; }
+    return true;
+}
+
+static void pollPairing() {
+    if (gPairToken.isEmpty() || (int32_t)(millis() - gPairPollAt) < 0) return;
+    if ((int32_t)(millis() - gPairExpires) >= 0) {
+        gPairUrl = gPairCode = gPairToken = ""; gState = FB_ERROR; gError = "Código QR expirado"; return;
+    }
+    StaticJsonDocument<128> body; body["poll_token"] = gPairToken;
+    String b; serializeJson(body, b); String resp;
+    int code = request("POST", PAIR_POLL, b, "application/json", "", resp);
+    gPairPollAt = millis() + 5000;
+    if (code != 200) { gError = code < 0 ? "Falha de rede ao verificar QR" : "Falha ao verificar QR"; return; }
+    StaticJsonDocument<64> filter; filter["status"] = true; filter["custom_token"] = true; filter["email"] = true;
+    DynamicJsonDocument doc(2048);
+    if (deserializeJson(doc, resp, DeserializationOption::Filter(filter))) return;
+    String status = String(doc["status"] | "");
+    if (status == "approved") {
+        String token = String(doc["custom_token"] | ""), email = String(doc["email"] | "");
+        gPairUrl = gPairCode = gPairToken = "";
+        if (signInCustomToken(token, email)) { gState = FB_SIGNED_IN; gError = ""; gForceBeat = true; }
+        else gState = FB_ERROR;
+    } else if (status == "denied" || status == "expired") {
+        gPairUrl = gPairCode = gPairToken = ""; gState = FB_ERROR;
+        gError = status == "denied" ? "Ligação recusada" : "Código QR expirado";
+    }
 }
 
 static bool refreshToken() {
@@ -628,6 +724,7 @@ static void fbTask(void *) {
 
         if (gPendLogout) {
             gPendLogout = false;
+            gPairUrl = gPairCode = gPairToken = ""; gPendPair = false;
             clearSession();
             gState = FB_SIGNED_OUT;
             gError = "";
@@ -635,6 +732,9 @@ static void fbTask(void *) {
         }
 
         if (WiFi.status() != WL_CONNECTED) {
+            if (gPendPair) {
+                gPendPair = false; gState = FB_ERROR; gError = "Liga a escala ao Wi-Fi para gerar o QR";
+            }
             if (gSendPending) { gSendPending = false; gSendResult = 3; }
             continue;
         }
@@ -648,6 +748,21 @@ static void fbTask(void *) {
             else gState = FB_ERROR;
             gPendPass = "";
             continue;
+        }
+
+        if (gPendPair) {
+            gPendPair = false;
+            gState = FB_BUSY; gError = "";
+            gPairUrl = gPairCode = gPairToken = "";
+            if (!ensureTime() || !startPairing()) {
+                if (gError.isEmpty()) gError = "Sem hora da internet";
+                gState = FB_ERROR;
+            }
+            continue;
+        }
+        if (!gPairToken.isEmpty()) {
+            pollPairing();
+            if (!gPairToken.isEmpty()) continue;
         }
 
         if (gSendPending && gRefresh.isEmpty()) { gSendPending = false; gSendResult = 3; }   // signed out: cannot send
@@ -739,6 +854,14 @@ void fbLogin(const String &email, const String &password) {
     gState = FB_BUSY;
     gPendLogin = true;
 }
+
+void fbPairStart() {
+    if (gState == FB_BUSY) return;
+    gPairUrl = gPairCode = gPairToken = "";
+    gState = FB_BUSY; gPendPair = true;
+}
+String fbPairUrl() { return gPairUrl; }
+String fbPairCode() { return gPairCode; }
 
 void fbLogout() { gPendLogout = true; }
 
