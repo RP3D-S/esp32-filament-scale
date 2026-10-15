@@ -18,7 +18,7 @@ static const uint32_t SPOOL_REMOVAL_DEBOUNCE_MS    = 400;
 static const uint32_t SPOOL_SETTLING_GUARD_MS      = 1500;
 static const float    SESSION_RESET_WEIGHT_RATIO   = 0.70f;
 static const float    SCANNING_REMOVAL_MIN_DROP_G  = 150.0f;
-static const uint32_t SCAN_DURATION_MS             = 8000;     // original NO_MOTOR_UID_WAIT_MS
+static const uint32_t TAG_WAIT_TIMEOUT_MS          = 8000;     // timeout only while no tag has been read
 static const uint32_t NO_UID_RESCAN_COOLDOWN_MS    = 2500;
 static const uint32_t SEND_TIMEOUT_MS              = 30000;
 static const uint32_t NEG_DRIFT_TARE_DELAY_MS      = 1000;
@@ -247,10 +247,9 @@ void wfUpdate(const WfInputs &in, WfOutputs &out) {
     if (phase == P_SCANNING) {
         updateStableWindow(w, now);   // keep the settle window warm, it is already earned by the time we need it
 
-        // A spool carries two tags. With one reader we get one; the inventory names the other,
-        // so a known twin plus a finished lookup is as good as reading both.
-        bool twinReady = latched.length() && in.spoolFetched && in.twin.length();
-        if (twinReady || now - scanStartMs >= SCAN_DURATION_MS) {
+        // This scale has one reader: the first tag is enough to start stabilizing.
+        // The inventory lookup is awaited before sending the net weight.
+        if (latched.length() || now - scanStartMs >= TAG_WAIT_TIMEOUT_MS) {
             if (latched.isEmpty()) {
                 phase = P_IDLE;
                 setSendPhase("idle", now);
@@ -261,7 +260,7 @@ void wfUpdate(const WfInputs &in, WfOutputs &out) {
                 phase = P_STABLE_WAIT;
                 stableWaitStartMs = now;
                 setSendPhase("stabilizing", now);
-                Serial.printf("[WF] SCANNING -> STABLE_WAIT uid=%s (%s)\n", latched.c_str(), twinReady ? "twin from inventory" : "timeout");
+                Serial.printf("[WF] SCANNING -> STABLE_WAIT uid=%s (first tag)\n", latched.c_str());
             }
         }
         return;

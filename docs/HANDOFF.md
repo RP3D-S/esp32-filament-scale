@@ -1,6 +1,31 @@
-# Handoff: ESP32 WROOM-32 filament scale + Android app
+# Handoff: Tiger Scale Lite ESP32-S3 + Android app
 
-Where things stand, so work can continue on another PC. Written 2026-10-05.
+## Current checkpoint (2026-10-15)
+
+- The primary target is the headless ESP32-S3 N16R8, built from `firmware/` with
+  `pio run -e esp32s3_n16r8`. WROOM was abandoned; the older notes below describe its history.
+- The single-reader workflow now advances from SCANNING to STABLE_WAIT on the first tag,
+  without waiting for a second tag or inventory twin. The 8-second RFID timeout applies only
+  when no tag is found. Stability checks and the inventory lookup for net weight remain.
+- This S3 firmware was built and flashed with a verified hash. Boot detected the UART RFID
+  reader and reconnected Wi-Fi. A complete physical weighing/send cycle is still unverified.
+- Firebase latency investigation captured seven DNS timeouts of about 2 seconds before the
+  fallback resolver answered in 0.13-0.45 seconds. The cloud task serializes inventory reads,
+  command polling, heartbeat and weight writes; HTTPS clients are recreated per request.
+  No weighing cycle occurred during that capture, so total send latency is not measured.
+- Existing local DNS/NTP changes in `firmware/src/firebase.cpp` are **not committed**: they
+  include bench-specific DNS routing and need cleanup before publication. The flashed build
+  includes that local code. Preserve it before changing checkout or moving the work to another PC.
+  Next: fix resolver selection/caching, align read/write DNS handling, and measure a real cycle.
+- USB PN532 experiments are isolated in `firmware/diagnostics/usb_pn532/`. Direct PC USB
+  identified CH340/PN532 v1.6 and read the same tag 152 times in 20 seconds without errors.
+  The S3 host initialized but enumerated no device. The reader LED remained dim/off with a
+  direct USB-C cable and an unpowered hub; VBUS/host connection still needs checking.
+  USB reader support is not integrated into the production firmware; UART remains in use.
+- Bench ports, flash/configuration backups and serial logs are local only. Backups under
+  `firmware/.pio/bench-backups/` can contain credentials and must remain ignored.
+
+The remaining sections retain the historical WROOM setup and validation, first written 2026-10-05.
 
 ## What this project is
 A headless fork of TigerScale V3. The ESP32 (KEYESTUDIO ESP32-WROOM-32, 4 MB flash, no PSRAM) does the

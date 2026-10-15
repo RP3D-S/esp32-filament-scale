@@ -1,7 +1,7 @@
 // Weigh workflow, ported from the original TigerScale firmware (section 21):
 //   IDLE -> SCANNING -> STABLE_WAIT -> SENDING -> DONE
-// The thresholds and the order of the checks are the original's. What differs: one NFC
-// reader and no motor, so the scan waits for the tag instead of turning the spool.
+// Uses the original weight thresholds with one NFC reader and no motor: the first
+// tag advances straight to stability checks, without waiting for a second tag.
 #pragma once
 #include <Arduino.h>
 
