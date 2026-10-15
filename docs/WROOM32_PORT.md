@@ -56,6 +56,10 @@ Current status and how to continue on another PC: [HANDOFF.md](HANDOFF.md).
 ## ESP32-S3 N16R8 alternative
 
 The S3 N16R8 target is available as PlatformIO environment `esp32s3_n16r8`.
+Its onboard addressable RGB LED is driven on GPIO48: red indicates weight on
+the platform, blue a newly read tag, green a successful Firebase send, and
+alternating blue/red a send error. `SCALE_RGB_LED_PIN` can override the LED pin
+at build time for another S3 board; the WROOM build does not use this LED.
 It uses HX711 DOUT/SCK on GPIO 4/5, PN532 HSU RX/TX on GPIO 16/17, PN532
 RSTPDN on GPIO 18, and the default buzzer on GPIO 6. GPIOs 26–37 are kept free
 because the S3's octal flash/PSRAM may use them; GPIO 0/3/45/46 (strapping) and

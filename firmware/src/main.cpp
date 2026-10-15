@@ -3,6 +3,9 @@
 // State goes to the phone over HTTP + WebSocket; protocol mirrors the upstream
 // TigerScale V3 API (docs/API.md) for the fields it shares, plus a few additions.
 #include <Arduino.h>
+#if defined(SCALE_BOARD_ESP32S3)
+#include <esp32-hal-rgb-led.h>
+#endif
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <ESPmDNS.h>
@@ -31,6 +34,9 @@
 #define PN532_RXD    16   // Serial2 (<- PN532 TXD)
 #define PN532_TXD    17
 #define PN532_RST    18
+#ifndef SCALE_RGB_LED_PIN
+#define SCALE_RGB_LED_PIN 48
+#endif
 #else
 #define HX711_DOUT   32
 #define HX711_SCK    33
@@ -200,6 +206,38 @@ static volatile bool rfTest = false;      // RFID test screen open: poll faster,
 static String  testUid;                    // sticky: stays after the tag is removed, until reset
 static volatile int pendRfPow = -1;
 static uint32_t seenMs = 0;
+
+#if defined(SCALE_BOARD_ESP32S3)
+enum RgbEvent : uint8_t { RGB_IDLE, RGB_TAG, RGB_SENT, RGB_ERROR };
+static RgbEvent rgbEvent = RGB_IDLE;
+static uint32_t rgbEventAt = 0;
+static uint8_t rgbLastR = 255, rgbLastG = 255, rgbLastB = 255;
+
+static void setRgbEvent(RgbEvent event) {
+    rgbEvent = event;
+    rgbEventAt = millis();
+}
+
+static void updateRgbLed() {
+    const uint32_t now = millis();
+    uint8_t r = 0, g = 0, b = 0;
+    const uint32_t elapsed = now - rgbEventAt;
+    if (rgbEvent == RGB_ERROR && elapsed < 6000) {
+        if ((now / 300) & 1) r = 32;
+        else b = 32;
+    } else if (rgbEvent == RGB_SENT && elapsed < 1500) {
+        g = 32;
+    } else if (rgbEvent == RGB_TAG && elapsed < 700) {
+        b = 32;
+    } else if (filtered >= PRESENT_G) {
+        r = 32;
+    }
+    if (r != rgbLastR || g != rgbLastG || b != rgbLastB) {
+        rgbLedWrite(SCALE_RGB_LED_PIN, r, g, b);
+        rgbLastR = r; rgbLastG = g; rgbLastB = b;
+    }
+}
+#endif
 
 static String  scaleStatus = "idle";
 static float   stableRef = 0;
@@ -534,8 +572,17 @@ static void updateStatus() {
     {   // sound: the weight reached the cloud / the send failed (the workflow counts both)
         static uint32_t okSeen = 0, failSeen = 0;
         WfStats st_ = wfStats();
-        if (st_.sendOk > okSeen) buzzerSuccess();
-        else if (st_.sendFail > failSeen) buzzerError();
+        if (st_.sendOk > okSeen) {
+            buzzerSuccess();
+#if defined(SCALE_BOARD_ESP32S3)
+            setRgbEvent(RGB_SENT);
+#endif
+        } else if (st_.sendFail > failSeen) {
+            buzzerError();
+#if defined(SCALE_BOARD_ESP32S3)
+            setRgbEvent(RGB_ERROR);
+#endif
+        }
         okSeen = st_.sendOk; failSeen = st_.sendFail;
     }
     if (out.tare) pendTare = true;
@@ -554,7 +601,12 @@ static void pollRfid() {
         // One beep per tag read. The reader can lose a tag for a moment, so the same UID is not announced
         // again within 8 s.
         static String beepUid; static uint32_t beepAt = 0;
-        if (tagLive.isEmpty() && (u != beepUid || millis() - beepAt > 8000)) { buzzerTagRead(); beepUid = u; beepAt = millis(); }
+        if (tagLive.isEmpty() && (u != beepUid || millis() - beepAt > 8000)) {
+            buzzerTagRead(); beepUid = u; beepAt = millis();
+#if defined(SCALE_BOARD_ESP32S3)
+            setRgbEvent(RGB_TAG);
+#endif
+        }
         tagLive = u; seenMs = millis();
         if (rfTest) testUid = u;
         // Brand / material / colour live in the tag's pages 5-8. A single failed read must not mean "no
@@ -1519,6 +1571,9 @@ void loop() {
     pollRfid();
     lap(4);
     if (!calActive()) updateStatus();   // and no weigh session runs underneath it
+#if defined(SCALE_BOARD_ESP32S3)
+    updateRgbLed();
+#endif
     lap(5);
 
     if (millis() - lastWs >= WS_INTERVAL_MS) {

@@ -26,3 +26,4 @@ log lives in git history and the synthesised entry lives in the changelog.
 
 ### Changed
 - Firebase errors returned directly over BLE now leave the app's connecting state, and the account dialog offers a cancel action that stops pending sign-in or QR polling; updated the Android Firebase state/dialog and firmware command/task handling.
+- The ESP32-S3 is now the default PlatformIO target, and its onboard RGB LED shows weight in red, tag reads in blue, successful Firebase sends in green, and send errors as alternating blue/red; updated `firmware/platformio.ini`, `firmware/src/main.cpp`, and `docs/WROOM32_PORT.md`.
