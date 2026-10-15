@@ -126,6 +126,7 @@ class MainActivity : ComponentActivity() {
                         onWifi = vm::configureWifi,
                         onFbLogin = vm::loginFirebase,
                         onFbPair = vm::pairFirebase,
+                        onFbCancel = vm::cancelFirebase,
                         onFbLogout = vm::logoutFirebase,
                         onRfidTest = vm::rfidTest,
                         onRfPower = vm::rfPower,
@@ -156,6 +157,7 @@ fun ScaleScreen(
     onWifi: (String, String) -> Unit,
     onFbLogin: (String, String) -> Unit,
     onFbPair: () -> Unit,
+    onFbCancel: () -> Unit,
     onFbLogout: () -> Unit,
     onRfidTest: (Boolean) -> Unit,
     onRfPower: (Int) -> Unit,
@@ -207,7 +209,7 @@ fun ScaleScreen(
     if (showSettings) {
         SettingsDialog(
             s, { showSettings = false }, cal, onWizard = { showSettings = false; showWizard = true },
-            onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbPair, onFbLogout,
+            onHost, onSearch, onScanWifi, onWifi, onFbLogin, onFbPair, onFbCancel, onFbLogout,
             onRfidTest, onRfPower, onPickScale = { showSettings = false; showPicker = true }, onForget = onForget,
             onRestart = onRestart, onFactoryReset = onFactoryReset, fw = fw, snd = snd, net = net,
         )
@@ -266,6 +268,7 @@ private fun SettingsDialog(
     onWifi: (String, String) -> Unit,
     onFbLogin: (String, String) -> Unit,
     onFbPair: () -> Unit,
+    onFbCancel: () -> Unit,
     onFbLogout: () -> Unit,
     onRfidTest: (Boolean) -> Unit,
     onRfPower: (Int) -> Unit,
@@ -311,7 +314,7 @@ private fun SettingsDialog(
     if (showLang) LanguageDialog { showLang = false }
     if (showWifi) WifiDialog(s, { showWifi = false }, onScanWifi, onWifi, net.applyFixed, net.forgetWifi)
     if (showRfid) RfidTestScreen(s, { showRfid = false }, onRfPower, onRfidTest)
-    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbPair, onFbLogout)
+    if (showFb) FirebaseDialog(s, { showFb = false }, onFbLogin, onFbPair, onFbCancel, onFbLogout)
     if (showHost) HostDialog(s.host, { showHost = false }) { onHost(it); showHost = false }
     if (showManual) ManualFactorDialog(s.calibration, { showManual = false }) { cal.factor(it); showManual = false }
 }
@@ -541,6 +544,7 @@ private fun FirebaseDialog(
     onDismiss: () -> Unit,
     onLogin: (String, String) -> Unit,
     onPair: () -> Unit,
+    onCancel: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -616,10 +620,8 @@ private fun FirebaseDialog(
         confirmButton = {
             if (s.fbState == 2) {
                 TextButton(onClick = { onLogout(); onDismiss() }) { Text(stringResource(R.string.logout)) }
-            } else if (s.fbPairUrl.isNotBlank()) {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) }
             } else if (s.fbState == 1) {
-                Text(stringResource(R.string.connecting))
+                TextButton(onClick = { onCancel(); onDismiss() }) { Text(stringResource(R.string.cancel)) }
             } else {
                 Row {
                     TextButton(onClick = onPair) { Text(stringResource(R.string.acct_qr_button)) }

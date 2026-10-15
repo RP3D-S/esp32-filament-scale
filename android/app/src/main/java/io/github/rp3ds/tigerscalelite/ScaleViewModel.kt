@@ -329,6 +329,13 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun cancelFirebase() {
+        _state.update { it.copy(fbState = 0, fbNeedsBoot = false, fbError = "", fbPairUrl = "", fbPairCode = "") }
+        if (!ble.sendSecure("""{"cmd":"fb_cancel"}""")) {
+            _state.update { it.copy(message = str(R.string.msg_bt_first)) }
+        }
+    }
+
     fun logoutFirebase() {
         ble.sendSecure("""{"cmd":"fb_logout"}""")
     }

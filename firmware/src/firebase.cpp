@@ -44,6 +44,7 @@ static uint32_t gTokenMs = 0;
 static String gPendEmail, gPendPass;
 static volatile bool gPendLogin = false, gPendLogout = false;
 static volatile bool gPendPair = false;
+static volatile bool gPendCancel = false;
 static String gPairUrl, gPairCode, gPairToken;
 static uint32_t gPairPollAt = 0, gPairExpires = 0;
 
@@ -722,6 +723,16 @@ static void fbTask(void *) {
         if (gPaused) { gIdle = true; continue; }
         gIdle = false;
 
+        if (gPendCancel) {
+            gPendCancel = false;
+            gPendPair = false;
+            gPairUrl = gPairCode = gPairToken = "";
+            gPendLogin = false;
+            gPendPass = "";
+            gState = gRefresh.isEmpty() ? FB_SIGNED_OUT : (gIdToken.isEmpty() ? FB_BUSY : FB_SIGNED_IN);
+            gError = "";
+        }
+
         if (gPendLogout) {
             gPendLogout = false;
             gPairUrl = gPairCode = gPairToken = ""; gPendPair = false;
@@ -849,6 +860,7 @@ void fbPublish(const FbSnapshot &s) {
 
 void fbLogin(const String &email, const String &password) {
     if (gState == FB_BUSY && gPendLogin) return;
+    gPendCancel = false;
     gPendEmail = email;
     gPendPass = password;
     gState = FB_BUSY;
@@ -857,9 +869,11 @@ void fbLogin(const String &email, const String &password) {
 
 void fbPairStart() {
     if (gState == FB_BUSY) return;
+    gPendCancel = false;
     gPairUrl = gPairCode = gPairToken = "";
     gState = FB_BUSY; gPendPair = true;
 }
+void fbCancel() { gPendCancel = true; }
 String fbPairUrl() { return gPairUrl; }
 String fbPairCode() { return gPairCode; }
 

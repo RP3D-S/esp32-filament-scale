@@ -840,6 +840,8 @@ public:
             bool allowed = fbState() != FB_SIGNED_IN || (bootBtnMs && millis() - bootBtnMs < 30000);
             if (!allowed) { bleSend("{\"fb_err\":\"boot\"}"); return; }
             fbPairStart();
+        } else if (!strcmp(cmd, "fb_cancel")) {
+            fbCancel();
         } else if (!strcmp(cmd, "fb_logout")) {
             fbLogout();
         } else if (!strcmp(cmd, "wifi_forget")) {

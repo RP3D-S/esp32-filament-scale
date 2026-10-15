@@ -35,6 +35,7 @@ void fbPublish(const FbSnapshot &s);
 void fbLogin(const String &email, const String &password);
 /** Starts the original TigerTag QR device-pairing flow. */
 void fbPairStart();
+void fbCancel();
 String fbPairUrl();
 String fbPairCode();
 void fbLogout();
