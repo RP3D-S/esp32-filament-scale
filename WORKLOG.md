@@ -25,6 +25,7 @@ log lives in git history and the synthesised entry lives in the changelog.
 - Added PlatformIO ESP32-S3 N16R8 build and OTA environments, an S3-safe peripheral pin map, and wiring/build notes in `firmware/platformio.ini`, `firmware/src/main.cpp`, `firmware/src/buzzer.cpp`, `firmware/src/buzzer.h`, `firmware/README.md`, and `docs/WROOM32_PORT.md`.
 
 ### Changed
+- Replaced hostname-based SNTP with direct UDP DNS/NTP and numeric Google NTP fallbacks; HTTPS uses a resolved IP with the original TLS hostname. Added retry throttling and network diagnostics in `firmware/src/firebase.cpp`.
 - Firebase errors returned directly over BLE now leave the app's connecting state, and the account dialog offers a cancel action that stops pending sign-in or QR polling; updated the Android Firebase state/dialog and firmware command/task handling.
 - The ESP32-S3 is now the default PlatformIO target, and its onboard RGB LED shows weight in red, tag reads in blue, successful Firebase sends in green, and send errors as alternating blue/red; updated `firmware/platformio.ini`, `firmware/src/main.cpp`, and `docs/WROOM32_PORT.md`.
 
@@ -37,3 +38,9 @@ log lives in git history and the synthesised entry lives in the changelog.
 ### Changed
 - The single-reader weighing workflow advances to stability checks as soon as the first tag is read; the 8-second RFID timeout now applies only when no tag is found. Inventory lookup for net weight and any twin-tag update remains in the send stage; updated `firmware/src/workflow.cpp` and `firmware/src/workflow.h`. The S3 build and flash hash verification passed, and boot detected the RFID reader and reconnected Wi-Fi; a physical weighing cycle remains unverified.
 - Updated `docs/HANDOFF.md` with the S3 checkpoint, flashed single-tag workflow, measured DNS delay, pending physical weighing test, USB diagnostic results, and the existing local DNS/NTP work still excluded from commits.
+
+## 2026-10-16
+
+### Fixed
+- Prioritized inventory lookup and pending weight sends over profile reads and heartbeats in `firmware/src/firebase.cpp`, retaining remote stop commands and logging send queue/duration. Added a TTL-bounded DNS cache with network invalidation and configured/working resolver selection in `firmware/src/firebase_dns.h`; read and write requests now share that resolver, without bench-specific routing. Added host regression tests in `firmware/tests/firebase_dns_test.cpp` and recorded the measured 23.807-second baseline and validation status in `docs/HANDOFF.md`.
+- Host cache tests, the S3 build and application flash/hash verification passed. The same 210 g physical retest completed in 8.827 seconds after the tag versus 23.807 seconds before (62.92% shorter), with both inventory writes HTTP 200, a 340 ms queue and 4652 ms for the writes. The cycle used cached DNS and had no DNS timeout, main-loop stall or negative-weight event; updated `docs/HANDOFF.md` with the measured result and the earlier idle auto-tare anomaly still unexplained.

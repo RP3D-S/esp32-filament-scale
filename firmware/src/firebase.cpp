@@ -1,10 +1,14 @@
 #include "firebase.h"
+#include "firebase_dns.h"
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <WiFiUdp.h>
+#include <esp_sntp.h>
+#include <sys/time.h>
 #include <time.h>
 #include <mbedtls/base64.h>
 
@@ -33,6 +37,7 @@ static volatile int gSendResult = 0;         // 0 none, 1 in flight, 2 ok, 3 fai
 static volatile bool gSendPending = false;
 static String gSendUid, gSendTwin;
 static int gSendNet = 0;
+static uint32_t gSendQueuedAt = 0;
 static volatile bool gForceBeat = false;
 static bool gProfileDocDone = false;
 static bool gProfilePhotoDone = false;
@@ -52,6 +57,7 @@ static const char *PAIR_START = "https://us-central1-tigertag-connect.cloudfunct
 static const char *PAIR_POLL = "https://us-central1-tigertag-connect.cloudfunctions.net/pairPoll";
 
 static bool gTimeOk = false;
+static uint32_t gLastTimeAttemptMs = 0;
 
 static void saveSession() {
     Preferences p;
@@ -80,19 +86,275 @@ static void clearSession() {
 extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
 extern const uint8_t rootca_crt_bundle_end[] asm("_binary_x509_crt_bundle_end");
 
+static FbDnsCache gDnsCache;
+
+static bool skipDnsName(const uint8_t *packet, size_t length, size_t &offset) {
+    while (offset < length) {
+        const uint8_t label = packet[offset++];
+        if (label == 0) return true;
+        if ((label & 0xc0) == 0xc0) {
+            if (offset >= length) return false;
+            ++offset;
+            return true;
+        }
+        if ((label & 0xc0) != 0 || label > length - offset) return false;
+        offset += label;
+    }
+    return false;
+}
+
+static bool resolveDnsUdpAt(const char *hostname, IPAddress &address, const IPAddress &dns,
+                            uint32_t &ttlSeconds) {
+    uint8_t query[128] = {};
+    const uint16_t queryId = (uint16_t)(millis() ^ (uintptr_t)hostname);
+    query[0] = queryId >> 8;
+    query[1] = queryId & 0xff;
+    query[2] = 0x01; // Recursion desired.
+    query[5] = 0x01; // One question.
+    size_t qlen = 12;
+    const char *label = hostname;
+    while (*label) {
+        const char *dot = strchr(label, '.');
+        const size_t length = dot ? (size_t)(dot - label) : strlen(label);
+        if (length == 0 || length > 63 || qlen + length + 6 >= sizeof(query)) return false;
+        query[qlen++] = (uint8_t)length;
+        memcpy(query + qlen, label, length);
+        qlen += length;
+        if (!dot) break;
+        label = dot + 1;
+    }
+    query[qlen++] = 0;
+    query[qlen++] = 0; query[qlen++] = 1; // A record.
+    query[qlen++] = 0; query[qlen++] = 1; // IN class.
+
+    WiFiUDP udp;
+    const bool socketStarted = udp.begin(0);
+    if (!socketStarted) return false;
+    const bool packetStarted = udp.beginPacket(dns, 53);
+    const size_t written = packetStarted ? udp.write(query, qlen) : 0;
+    const bool sent = packetStarted && written == qlen && udp.endPacket();
+    if (!sent) { udp.stop(); return false; }
+    Serial.printf("[DNS] query %s sent id=%u bytes=%u to %s\n", hostname,
+                  (unsigned)queryId, (unsigned)written, dns.toString().c_str());
+
+    const uint32_t started = millis();
+    while (millis() - started < 2000) {
+        const int packetSize = udp.parsePacket();
+        if (packetSize >= 12 && packetSize <= 512) {
+            uint8_t response[512];
+            const int received = udp.read(response, sizeof(response));
+            Serial.printf("[DNS] reply %s bytes=%d id=%u rcode=%u answers=%u from %s:%u\n",
+                          hostname, received,
+                          received >= 2 ? (unsigned)((response[0] << 8) | response[1]) : 0,
+                          received >= 4 ? (unsigned)(response[3] & 0x0f) : 0,
+                          received >= 8 ? (unsigned)((response[6] << 8) | response[7]) : 0,
+                          udp.remoteIP().toString().c_str(), (unsigned)udp.remotePort());
+            if (received >= 12 && udp.remoteIP() == dns && udp.remotePort() == 53 &&
+                response[0] == query[0] && response[1] == query[1] &&
+                (response[2] & 0x80) && !(response[2] & 0x02) && (response[3] & 0x0f) == 0) {
+                const uint16_t questions = ((uint16_t)response[4] << 8) | response[5];
+                const uint16_t answers = ((uint16_t)response[6] << 8) | response[7];
+                size_t offset = 12;
+                bool valid = questions == 1 && skipDnsName(response, received, offset) &&
+                             offset + 4 <= (size_t)received;
+                if (valid) offset += 4;
+                uint32_t minTtl = UINT32_MAX;
+                for (uint16_t i = 0; valid && i < answers; ++i) {
+                    valid = skipDnsName(response, received, offset) && offset + 10 <= (size_t)received;
+                    if (!valid) break;
+                    const uint16_t type = ((uint16_t)response[offset] << 8) | response[offset + 1];
+                    const uint16_t klass = ((uint16_t)response[offset + 2] << 8) | response[offset + 3];
+                    const uint32_t ttl = ((uint32_t)response[offset + 4] << 24) |
+                                         ((uint32_t)response[offset + 5] << 16) |
+                                         ((uint32_t)response[offset + 6] << 8) | response[offset + 7];
+                    const uint16_t dataLength = ((uint16_t)response[offset + 8] << 8) | response[offset + 9];
+                    offset += 10;
+                    if (offset + dataLength > (size_t)received) { valid = false; break; }
+                    if (klass == 1 && (type == 1 || type == 5) && ttl < minTtl) minTtl = ttl;
+                    if (type == 1 && klass == 1 && dataLength == 4) {
+                        address = IPAddress(response[offset], response[offset + 1],
+                                            response[offset + 2], response[offset + 3]);
+                        ttlSeconds = minTtl;
+                        udp.stop();
+                        Serial.printf("[DNS] %s -> %s\n", hostname, address.toString().c_str());
+                        return true;
+                    }
+                    offset += dataLength;
+                }
+            }
+        }
+        delay(25);
+    }
+    udp.stop();
+    Serial.printf("[DNS] timeout for %s via %s\n", hostname, dns.toString().c_str());
+    return false;
+}
+
+static bool resolveDnsUdp(const char *hostname, IPAddress &address) {
+    if (address.fromString(hostname)) return true;
+    gDnsCache.setNetwork((uint32_t)WiFi.localIP(), (uint32_t)WiFi.gatewayIP(),
+                         (uint32_t)WiFi.dnsIP(0), (uint32_t)WiFi.dnsIP(1), WiFi.BSSID());
+    uint32_t cached;
+    if (gDnsCache.lookup(hostname, millis(), cached)) {
+        address = IPAddress(cached);
+        Serial.printf("[DNS] cache %s -> %s\n", hostname, address.toString().c_str());
+        return true;
+    }
+    // Start with this network's configured DNS, then remember a working fallback.
+    const IPAddress servers[] = {IPAddress(gDnsCache.preferred()), WiFi.dnsIP(0),
+                                  WiFi.dnsIP(1), IPAddress(1, 1, 1, 1)};
+    for (size_t i = 0; i < sizeof(servers) / sizeof(servers[0]); ++i) {
+        if (servers[i] == IPAddress(0, 0, 0, 0)) continue;
+        bool duplicate = false;
+        for (size_t j = 0; j < i; ++j) if (servers[i] == servers[j]) duplicate = true;
+        if (duplicate) continue;
+        uint32_t ttl = 0;
+        if (resolveDnsUdpAt(hostname, address, servers[i], ttl)) {
+            gDnsCache.prefer((uint32_t)servers[i]);
+            gDnsCache.remember(hostname, (uint32_t)address, ttl, millis());
+            return true;
+        }
+    }
+    return false;
+}
+
+class ResolvedSecureClient : public WiFiClientSecure {
+public:
+    int connect(const char *host, uint16_t port, int32_t timeout) override {
+        IPAddress address;
+        setTimeout(timeout);
+        if (!resolveDnsUdp(host, address)) return 0;
+        const int connected = WiFiClientSecure::connect(address, port, host, nullptr, nullptr, nullptr);
+        if (!connected) gDnsCache.forget(host);
+        return connected;
+    }
+};
+
+static bool syncTimeUdp(const char *server, const IPAddress &address) {
+    WiFiUDP udp;
+    const bool socketStarted = udp.begin(0);
+    if (!socketStarted) {
+        Serial.printf("[NTP] socket failed server=%s\n", server);
+        return false;
+    }
+
+    uint8_t requestPacket[48] = {};
+    requestPacket[0] = 0x23; // NTP v4 client request.
+    bool sent;
+    const bool packetStarted = udp.beginPacket(address, 123);
+    const size_t bytesWritten = packetStarted ? udp.write(requestPacket, sizeof(requestPacket)) : 0;
+    sent = packetStarted && bytesWritten == sizeof(requestPacket) && udp.endPacket();
+    if (!sent) {
+        Serial.printf("[NTP] send failed server=%s ip=%s\n",
+                      server, address.toString().c_str());
+        udp.stop();
+        return false;
+    }
+    Serial.printf("[NTP] sent server=%s ip=%s\n", server, address.toString().c_str());
+
+    const uint32_t started = millis();
+    while (millis() - started < 2500) {
+        const int packetSize = udp.parsePacket();
+        if (packetSize >= 48) {
+            uint8_t response[48];
+            if (udp.read(response, sizeof(response)) == sizeof(response)) {
+                const uint8_t mode = response[0] & 0x07;
+                const uint8_t version = (response[0] >> 3) & 0x07;
+                const uint8_t stratum = response[1];
+                const uint32_t ntpSeconds = ((uint32_t)response[40] << 24) |
+                                            ((uint32_t)response[41] << 16) |
+                                            ((uint32_t)response[42] << 8) |
+                                            (uint32_t)response[43];
+                const uint64_t unixSeconds = (uint64_t)ntpSeconds - 2208988800ULL;
+                if (mode == 4 && version >= 3 && stratum > 0 && stratum <= 15 &&
+                    unixSeconds > 1700000000ULL) {
+                    struct timeval now = {};
+                    now.tv_sec = (time_t)unixSeconds;
+                    settimeofday(&now, nullptr);
+                    udp.stop();
+                    Serial.printf("[NTP] synchronized server=%s epoch=%lld stratum=%u\n",
+                                  server, (long long)now.tv_sec, (unsigned)stratum);
+                    return true;
+                }
+                Serial.printf("[NTP] invalid reply server=%s mode=%u version=%u stratum=%u\n",
+                              server, (unsigned)mode, (unsigned)version, (unsigned)stratum);
+            }
+        }
+        delay(50);
+    }
+    udp.stop();
+    Serial.printf("[NTP] timeout server=%s ip=%s\n",
+                  server, address.toString().c_str());
+    return false;
+}
+
+static bool syncTimeUdp(const char *server) {
+    IPAddress address;
+    if (!resolveDnsUdp(server, address)) {
+        Serial.printf("[NTP] DNS failed server=%s\n", server);
+        return false;
+    }
+    return syncTimeUdp(server, address);
+}
+
+static bool syncTimeSntpGoogle() {
+    const IPAddress servers[] = {
+        IPAddress(216, 239, 35, 0), IPAddress(216, 239, 35, 4),
+        IPAddress(216, 239, 35, 8), IPAddress(216, 239, 35, 12)
+    };
+    for (const IPAddress &server : servers) {
+        esp_sntp_stop();
+        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+        ip_addr_t address;
+        IP_ADDR4(&address, server[0], server[1], server[2], server[3]);
+        esp_sntp_setserver(0, &address);
+        esp_sntp_init();
+        Serial.printf("[NTP] SNTP direct server=%s\n", server.toString().c_str());
+        for (int i = 0; i < 32; ++i) {
+            delay(250);
+            const time_t now = time(nullptr);
+            if (now > 1700000000L) {
+                Serial.printf("[NTP] synchronized epoch=%lld reach=%02x\n",
+                              (long long)now, (unsigned)esp_sntp_getreachability(0));
+                esp_sntp_stop();
+                return true;
+            }
+        }
+        Serial.printf("[NTP] SNTP timeout server=%s reach=%02x\n",
+                      server.toString().c_str(), (unsigned)esp_sntp_getreachability(0));
+    }
+    esp_sntp_stop();
+    return false;
+}
+
 static bool ensureTime() {
     if (gTimeOk) return true;
-    if (time(nullptr) > 1700000000L) { gTimeOk = true; return true; }
-    configTime(0, 0, "pool.ntp.org", "time.google.com");
-    for (int i = 0; i < 40 && time(nullptr) < 1700000000L; i++) delay(250);
-    gTimeOk = time(nullptr) > 1700000000L;
+    const time_t initialTime = time(nullptr);
+    if (initialTime > 1700000000L) { gTimeOk = true; return true; }
+    if (gLastTimeAttemptMs != 0 && millis() - gLastTimeAttemptMs < 60000) return false;
+    gLastTimeAttemptMs = millis();
+
+    const String ip = WiFi.localIP().toString();
+    const String gateway = WiFi.gatewayIP().toString();
+    const String dns = WiFi.dnsIP(0).toString();
+    Serial.printf("[NTP] start wifi=%d ip=%s gateway=%s dns=%s epoch=%lld\n",
+                  (int)WiFi.status(), ip.c_str(), gateway.c_str(), dns.c_str(),
+                  (long long)initialTime);
+    // Resolve and query NTP in this task. The Arduino SNTP hostname callback
+    // can run outside the lwIP core lock in this firmware/core combination.
+    gTimeOk = syncTimeUdp("pool.ntp.org") || syncTimeUdp("time.google.com") ||
+              syncTimeUdp("time.google.com", IPAddress(216, 239, 35, 0)) ||
+              syncTimeUdp("time.google.com", IPAddress(216, 239, 35, 4)) ||
+              syncTimeUdp("time.google.com", IPAddress(216, 239, 35, 8)) ||
+              syncTimeUdp("time.google.com", IPAddress(216, 239, 35, 12)) ||
+              syncTimeSntpGoogle();
     return gTimeOk;
 }
 
 // POST/GET helper. Returns the HTTP status, fills `resp`.
 static int request(const char *method, const String &url, const String &body,
                    const char *contentType, const String &bearer, String &resp) {
-    WiFiClientSecure client;
+    ResolvedSecureClient client;
     client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
     HTTPClient http;
     http.setTimeout(10000);
@@ -338,7 +600,7 @@ static bool fetchProfile() {
         ProfileScanner sc;
         int code;
         {
-            WiFiClientSecure client;
+            ResolvedSecureClient client;
             client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
             HTTPClient http;
             http.setTimeout(10000);
@@ -369,7 +631,7 @@ static bool fetchProfile() {
         ProfileScanner sc;
         int code;
         {
-            WiFiClientSecure client;
+            ResolvedSecureClient client;
             client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
             HTTPClient http;
             http.setTimeout(10000);
@@ -449,7 +711,7 @@ private:
 };
 
 static bool streamGet(const String &url, Stream &sink, int &code) {
-    WiFiClientSecure client;
+    ResolvedSecureClient client;
     client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
     HTTPClient http;
     http.setTimeout(10000);
@@ -743,6 +1005,7 @@ static void fbTask(void *) {
         }
 
         if (WiFi.status() != WL_CONNECTED) {
+            gDnsCache.clear();
             if (gPendPair) {
                 gPendPair = false; gState = FB_ERROR; gError = "Liga a escala ao Wi-Fi para gerar o QR";
             }
@@ -791,24 +1054,23 @@ static void fbTask(void *) {
 
         if (gSendPending) {
             gSendPending = false;
+            const uint32_t started = millis();
+            Serial.printf("[FB] send start id=%u queue=%ums\n", (unsigned)gSendId,
+                          (unsigned)(started - gSendQueuedAt));
             bool ok = doSend();
             gSendResult = ok ? 2 : 3;
+            Serial.printf("[FB] send done id=%u ok=%d duration=%ums\n", (unsigned)gSendId,
+                          ok, (unsigned)(millis() - started));
             if (ok) gForceBeat = true;   // the original beats right after a send
+            continue;   // let loop() publish the result before the post-send heartbeat
         }
 
-        if (gNeedProfile) {
-            if (fetchProfile() || ++gProfileTries >= 3) gNeedProfile = false;
-        }
-
-        if (millis() - lastCmdPoll >= 15000) {
-            lastCmdPoll = millis();
-            pollCommands();
-        }
-
-        // Heartbeat every 30 s, or at once when the tag changes.
         String curUid;
+        bool weighing;
         xSemaphoreTake(gLock, portMAX_DELAY);
         curUid = gSnap.uid;
+        weighing = gSnap.wfPhase == "scanning" || gSnap.wfPhase == "stable_wait" ||
+                   gSnap.wfPhase == "sending";
         xSemaphoreGive(gLock);
         if (curUid != spoolUid) {
             spoolUid = curUid;
@@ -817,8 +1079,23 @@ static void fbTask(void *) {
                 xSemaphoreTake(gLock, portMAX_DELAY); gSpool = none; xSemaphoreGive(gLock);
             } else {
                 fetchSpool(curUid);
+                // loop() can now queue the net weight. Do not start a heartbeat first.
+                continue;
             }
         }
+
+        if (!weighing && gNeedProfile) {
+            if (fetchProfile() || ++gProfileTries >= 3) gNeedProfile = false;
+        }
+        if (gSendPending) continue;
+        // Keep remote stop/cancel commands available during a weighing session.
+        if (millis() - lastCmdPoll >= 15000) {
+            lastCmdPoll = millis();
+            pollCommands();
+        }
+        if (weighing || gSendPending) continue;
+
+        // Heartbeat every 30 s or when the tag changes, after weighing work.
         bool changed = curUid != lastUid;
         if (lastBeat == 0 || changed || gForceBeat || millis() - lastBeat >= HEARTBEAT_MS) {
             gForceBeat = false;
@@ -888,6 +1165,7 @@ uint32_t fbSendWeight(const String &uid, const String &twin, int netGrams) {
     uint32_t id = gSendId + 1;
     gSendId = id;
     gSendResult = 1;
+    gSendQueuedAt = millis();
     gSendPending = true;
     return id;
 }

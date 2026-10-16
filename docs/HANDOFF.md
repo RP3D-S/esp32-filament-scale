@@ -1,22 +1,29 @@
 # Handoff: Tiger Scale Lite ESP32-S3 + Android app
 
-## Current checkpoint (2026-10-15)
+## Current checkpoint (2026-10-16)
 
 - The primary target is the headless ESP32-S3 N16R8, built from `firmware/` with
   `pio run -e esp32s3_n16r8`. WROOM was abandoned; the older notes below describe its history.
 - The single-reader workflow now advances from SCANNING to STABLE_WAIT on the first tag,
   without waiting for a second tag or inventory twin. The 8-second RFID timeout applies only
   when no tag is found. Stability checks and the inventory lookup for net weight remain.
-- This S3 firmware was built and flashed with a verified hash. Boot detected the UART RFID
-  reader and reconnected Wi-Fi. A complete physical weighing/send cycle is still unverified.
-- Firebase latency investigation captured seven DNS timeouts of about 2 seconds before the
-  fallback resolver answered in 0.13-0.45 seconds. The cloud task serializes inventory reads,
-  command polling, heartbeat and weight writes; HTTPS clients are recreated per request.
-  No weighing cycle occurred during that capture, so total send latency is not measured.
-- Existing local DNS/NTP changes in `firmware/src/firebase.cpp` are **not committed**: they
-  include bench-specific DNS routing and need cleanup before publication. The flashed build
-  includes that local code. Preserve it before changing checkout or moving the work to another PC.
-  Next: fix resolver selection/caching, align read/write DNS handling, and measure a real cycle.
+- The single-tag S3 firmware was built/flashed with a verified hash. A physical cycle then
+  sent 210 g successfully to both associated inventory records (HTTP 200): 23.807 seconds
+  after the first tag, including 2.305 s stabilization, 4.676 s inventory wait, 7.720 s queued
+  behind a heartbeat, and 9.106 s for the two writes. There was no second physical tag scan.
+  The inventory contained no container weight, so net-weight subtraction was not validated.
+- Priority/DNS correction: the cloud task fetches inventory before background
+  work, yields after lookup/send, and defers heartbeats during weighing. Read/write/profile
+  requests share a TTL-bounded DNS cache; network changes or failed TLS connections invalidate
+  entries. Configured/previously working DNS replaces the bench-specific routing. Remote stop
+  commands remain polled. Host cache tests, the S3 build and application flash/hash verification
+  passed. Boot reconnected Wi-Fi, synchronized NTP and loaded the Firebase profile. The same
+  210 g physical retest then completed in 8.827 seconds after the tag (62.92% shorter than
+  the 23.807-second baseline), with both inventory writes HTTP 200. Firmware counters showed
+  a 340 ms queue wait and 4652 ms for the two writes. Inventory and writes used the DNS cache;
+  there was no DNS timeout, main-loop stall or negative-weight event during this cycle.
+  These are individual trials, not an averaged benchmark. Earlier isolated negative readings
+  triggered auto-tare during idle observation; their cause remains unexplained.
 - USB PN532 experiments are isolated in `firmware/diagnostics/usb_pn532/`. Direct PC USB
   identified CH340/PN532 v1.6 and read the same tag 152 times in 20 seconds without errors.
   The S3 host initialized but enumerated no device. The reader LED remained dim/off with a
