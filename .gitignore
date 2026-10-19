@@ -139,3 +139,6 @@ __pycache__/
 
 # Output of firmware/scripts/release_firmware.py
 firmware/dist/
+
+# Session attachments (photos) that Codex drops into the working tree
+.codex-remote-attachments/
