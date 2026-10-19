@@ -220,15 +220,32 @@ static bool resolveDnsUdp(const char *hostname, IPAddress &address) {
 
 class ResolvedSecureClient : public WiFiClientSecure {
 public:
+    uint32_t dnsMs = 0, connMs = 0;   // measured in connect(): name lookup, then TCP + TLS handshake
     int connect(const char *host, uint16_t port, int32_t timeout) override {
         IPAddress address;
         setTimeout(timeout);
-        if (!resolveDnsUdp(host, address)) return 0;
+        const uint32_t t0 = millis();
+        const bool resolved = resolveDnsUdp(host, address);
+        dnsMs = millis() - t0;
+        if (!resolved) return 0;
+        const uint32_t t1 = millis();
         const int connected = WiFiClientSecure::connect(address, port, host, nullptr, nullptr, nullptr);
+        connMs = millis() - t1;
         if (!connected) gDnsCache.forget(host);
         return connected;
     }
 };
+
+// One line per cloud request: where the time went (name lookup, TCP + TLS, the rest is the server and the transfer).
+static void logRequest(const char *method, const String &url, const ResolvedSecureClient &c, int code, uint32_t startedMs) {
+    const int d = url.indexOf("/documents/");
+    String what = d >= 0 ? url.substring(d + 11) : url;
+    const int q = what.indexOf('?');
+    if (q >= 0) what.remove(q);
+    if (what.length() > 48) what = what.substring(what.length() - 48);
+    Serial.printf("[FB] req %s ...%s -> HTTP %d dns=%ums tls=%ums total=%ums\n", method, what.c_str(), code,
+                  (unsigned)c.dnsMs, (unsigned)c.connMs, (unsigned)(millis() - startedMs));
+}
 
 static bool syncTimeUdp(const char *server, const IPAddress &address) {
     WiFiUDP udp;
@@ -354,6 +371,7 @@ static bool ensureTime() {
 // POST/GET helper. Returns the HTTP status, fills `resp`.
 static int request(const char *method, const String &url, const String &body,
                    const char *contentType, const String &bearer, String &resp) {
+    const uint32_t started = millis();
     ResolvedSecureClient client;
     client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
     HTTPClient http;
@@ -366,6 +384,7 @@ static int request(const char *method, const String &url, const String &body,
              : http.POST(body);
     resp = http.getString();
     http.end();
+    logRequest(method, url, client, code, started);
     return code;
 }
 
@@ -711,6 +730,7 @@ private:
 };
 
 static bool streamGet(const String &url, Stream &sink, int &code) {
+    const uint32_t started = millis();
     ResolvedSecureClient client;
     client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
     HTTPClient http;
@@ -720,6 +740,7 @@ static bool streamGet(const String &url, Stream &sink, int &code) {
     code = http.GET();
     if (code == 200) http.writeToStream(&sink);
     http.end();
+    logRequest("GET", url, client, code, started);
     return true;   // the client is destroyed on return: one TLS session alive at a time
 }
 
@@ -823,12 +844,19 @@ static bool patchCommand(const String &id, const char *status, int progress, con
     return code >= 200 && code < 300;
 }
 
+// How often to look for remote commands. A 403 means the account's Firestore rules do not let this scale read the
+// collection: every poll is then a ~2.8 s request that can only fail, and the cloud task is single-threaded, so a send
+// queued behind it waits. Look rarely until it works.
+static uint32_t gCmdPollMs = 15000;
+
 static void pollCommands() {
     CommandScanner sc;
     int code = -1;
     String url = String("https://firestore.googleapis.com/v1/projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid +
                  "/scales/" + gMac + "/commands?pageSize=8";
-    if (!streamGet(url, sc, code) || code != 200) return;   // 404: no commands collection yet
+    if (!streamGet(url, sc, code)) return;
+    gCmdPollMs = code == 403 ? 300000 : 15000;
+    if (code != 200) return;   // 404: no commands collection yet
     for (int i = 0; i < sc.n; i++) {
         RemoteCmd &c = sc.cmds[i];
         if (c.status != "pending") continue;
@@ -867,13 +895,50 @@ static bool patchInventory(const String &id, int net, const String &ts) {
     return ok;
 }
 
+// Both inventory documents in one atomic request. A TLS handshake costs ~1.8 s on this chip, so one request instead of
+// two saves about 3 s per weighing. Same precondition as patchInventory(): never create a document.
+static bool commitInventory(const String &idA, const String &idB, int net, const String &ts) {
+    const String base = String("projects/") + PROJECT + "/databases/(default)/documents/users/" + gUid + "/inventory/";
+    String payload;
+    {
+        DynamicJsonDocument doc(2048);
+        JsonArray writes = doc.createNestedArray("writes");
+        for (const String *id : {&idA, &idB}) {
+            JsonObject w = writes.createNestedObject();
+            JsonObject upd = w.createNestedObject("update");
+            upd["name"] = base + *id;
+            JsonObject f = upd.createNestedObject("fields");
+            f["weight_available"]["integerValue"] = String(net);
+            f["last_update"]["timestampValue"] = ts;
+            JsonArray mask = w.createNestedObject("updateMask").createNestedArray("fieldPaths");
+            mask.add("weight_available");
+            mask.add("last_update");
+            w.createNestedObject("currentDocument")["exists"] = true;
+        }
+        serializeJson(doc, payload);
+    }
+    String resp;
+    int code = request("POST", String("https://firestore.googleapis.com/v1/projects/") + PROJECT +
+                       "/databases/(default)/documents:commit", payload, "application/json", gIdToken, resp);
+    bool ok = code >= 200 && code < 300;
+    Serial.printf("[FB] commit inventory/%s + %s net=%d -> HTTP %d%s\n", idA.c_str(), idB.c_str(), net, code,
+                  ok ? "" : (" " + resp.substring(0, 100)).c_str());
+    return ok;
+}
+
 static bool doSend() {
     static const uint32_t DELAYS[] = {1000, 2000};   // the original's backoff
     String ts = isoNow();
+    const bool twin = gSendTwin.length() && gSendTwin != gSendUid;
+    bool useCommit = twin;   // one request for both documents; a failed commit falls back to one by one for the rest
     for (int attempt = 0; attempt < 3; attempt++) {
         if (attempt) vTaskDelay(pdMS_TO_TICKS(DELAYS[attempt - 1]));
+        if (useCommit) {
+            if (commitInventory(gSendUid, gSendTwin, gSendNet, ts)) return true;
+            useCommit = false;   // e.g. the twin is not in the inventory: still write the spool itself
+        }
         bool ok = patchInventory(gSendUid, gSendNet, ts);
-        if (ok && gSendTwin.length() && gSendTwin != gSendUid) ok = patchInventory(gSendTwin, gSendNet, ts);
+        if (ok && twin) ok = patchInventory(gSendTwin, gSendNet, ts);
         if (ok) return true;
     }
     return false;
@@ -1089,7 +1154,7 @@ static void fbTask(void *) {
         }
         if (gSendPending) continue;
         // Keep remote stop/cancel commands available during a weighing session.
-        if (millis() - lastCmdPoll >= 15000) {
+        if (millis() - lastCmdPoll >= gCmdPollMs) {
             lastCmdPoll = millis();
             pollCommands();
         }

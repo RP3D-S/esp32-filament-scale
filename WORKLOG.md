@@ -44,3 +44,12 @@ log lives in git history and the synthesised entry lives in the changelog.
 ### Fixed
 - Prioritized inventory lookup and pending weight sends over profile reads and heartbeats in `firmware/src/firebase.cpp`, retaining remote stop commands and logging send queue/duration. Added a TTL-bounded DNS cache with network invalidation and configured/working resolver selection in `firmware/src/firebase_dns.h`; read and write requests now share that resolver, without bench-specific routing. Added host regression tests in `firmware/tests/firebase_dns_test.cpp` and recorded the measured 23.807-second baseline and validation status in `docs/HANDOFF.md`.
 - Host cache tests, the S3 build and application flash/hash verification passed. The same 210 g physical retest completed in 8.827 seconds after the tag versus 23.807 seconds before (62.92% shorter), with both inventory writes HTTP 200, a 340 ms queue and 4652 ms for the writes. The cycle used cached DNS and had no DNS timeout, main-loop stall or negative-weight event; updated `docs/HANDOFF.md` with the measured result and the earlier idle auto-tare anomaly still unexplained.
+
+## 2026-10-19
+
+### Changed
+- The two inventory writes of a weighing (spool and its twin) go out as one atomic `documents:commit` instead of two PATCH requests, falling back to the sequential PATCHes if the commit fails (for example a twin that is not in the inventory); each request costs ~1.8 s of TLS handshake on the S3, so this should save about 2.8 s per weighing. Built, flashed and hash-verified on the S3, but not exercised end to end because the NFC reader was unplugged during the bench test; updated `firmware/src/firebase.cpp`.
+- The remote-command poll backs off from 15 s to 5 min after an HTTP 403 (the account's Firestore rules do not let the scale list `commands`), so a request that can only fail no longer blocks the single-threaded cloud task every 15 s; measured: one 403 in 180 s instead of one every 15 s. Updated `firmware/src/firebase.cpp`.
+
+### Added
+- One `[FB] req <method> <path> -> HTTP <code> dns=<ms> tls=<ms> total=<ms>` log line per cloud request, to see where the time goes (bench: dns 0-1 ms with the cache, tls 1.8-2.0 s, total 2.7-3.0 s per request); updated `firmware/src/firebase.cpp`.
