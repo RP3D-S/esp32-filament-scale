@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build the firmware and publish it as a GitHub Release that the app can update from.
 
-    python firmware/scripts/release_firmware.py [--notes "text"] [--no-build] [--dry-run]
+    python firmware/scripts/release_firmware.py [--env ENV] [--notes "text"] [--no-build] [--dry-run]
 
-It reads the version from FW_VERSION in firmware/platformio.ini, builds the esp32dev_hsu image, and writes
+It reads the version from FW_VERSION in firmware/platformio.ini, builds the image of --env (default: the ESP32-S3
+N16R8 board, esp32s3_n16r8; an image for the wrong chip does not boot after an OTA and there is no rollback), and writes
 firmware/dist/firmware.bin plus firmware/dist/firmware.json ({version, size, sha256, md5}). Unless --dry-run, it
 then creates the release `fw-v<version>` with `gh release create` (GitHub CLI, logged in), attaching both files.
 The app reads the newest non-draft release that has both assets, checks the SHA-256 of the download against
@@ -23,7 +24,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 FW_DIR = os.path.dirname(HERE)
 DIST = os.path.join(FW_DIR, "dist")
-ENV = "esp32dev_hsu"
+DEFAULT_ENV = "esp32s3_n16r8"
 
 
 def version() -> str:
@@ -36,11 +37,13 @@ def version() -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--env", default=DEFAULT_ENV, help="PlatformIO environment to build (must match the scale's chip)")
     ap.add_argument("--notes", default="", help="release notes")
     ap.add_argument("--no-build", action="store_true", help="use the image already built")
     ap.add_argument("--dry-run", action="store_true", help="write dist/ but do not publish")
     args = ap.parse_args()
 
+    ENV = args.env
     ver = version()
     if not args.no_build:
         subprocess.check_call(["pio", "run", "-e", ENV], cwd=FW_DIR)
@@ -70,7 +73,7 @@ def main():
     tag = f"fw-v{ver}"
     subprocess.check_call([
         "gh", "release", "create", tag, image, manifest_path,
-        "--title", f"Firmware {ver}", "--notes", args.notes or f"Firmware {ver} for the Tiger Scale Lite (ESP32 WROOM-32).",
+        "--title", f"Firmware {ver}", "--notes", args.notes or f"Firmware {ver} for the Tiger Scale Lite (ESP32-S3 N16R8).",
     ], cwd=FW_DIR)
     print(f"published {tag}")
 
