@@ -73,9 +73,11 @@ static const RfLevel RF_LEVELS[] = {
 static const uint8_t RF_LEVEL_COUNT = sizeof(RF_LEVELS) / sizeof(RF_LEVELS[0]);
 static uint8_t rfPow = 3;
 
-// What a TigerTag keeps in pages 5..8: product, material (bytes 4-5), brand (10-11) and colour (12-14).
+// What a TigerTag keeps in pages 5..8: product (bytes 0-3, u32 big-endian, 0xFFFFFFFF on a standard TigerTag
+// that is not in the catalogue), material (bytes 4-5), brand (10-11) and colour (12-14).
 struct TagMeta {
     bool valid = false;
+    uint32_t product = 0xFFFFFFFFu;
     uint16_t brand = 0, material = 0;
     uint8_t r = 0, g = 0, b = 0;
 };
@@ -163,6 +165,7 @@ public:
             Serial.printf("[RFID] pages 5-8: ");
             for (int k = 0; k < 16; k++) Serial.printf("%02X ", d[k]);
             Serial.println();
+            m.product = ((uint32_t)d[0] << 24) | ((uint32_t)d[1] << 16) | ((uint32_t)d[2] << 8) | d[3];
             m.material = (uint16_t)((d[4] << 8) | d[5]);
             m.brand = (uint16_t)((d[10] << 8) | d[11]);
             m.r = d[12]; m.g = d[13]; m.b = d[14];
@@ -618,7 +621,7 @@ static void pollRfid() {
             TagMeta m;
             if (reader.readMeta(m)) {
                 tagMeta = m;
-                Serial.printf("[RFID] tag %s brand=%u material=%u colour=%02X%02X%02X\n", u.c_str(), m.brand, m.material, m.r, m.g, m.b);
+                Serial.printf("[RFID] tag %s product=%lu brand=%u material=%u colour=%02X%02X%02X\n", u.c_str(), (unsigned long)m.product, m.brand, m.material, m.r, m.g, m.b);
             } else if (metaTries == 1 || metaTries == 12) {
                 Serial.printf("[RFID] tag %s: could not read pages 5-8 (try %d)\n", u.c_str(), metaTries);
             }
@@ -992,6 +995,16 @@ static void enqueueAvatar(const String &url) {
     }
 }
 
+// Where the spool's photo comes from. A TigerTag+ carries its catalogue product id, and the catalogue image has a
+// fixed URL for it, so the photo is known the moment the tag is read: no request from the scale at all (the app
+// downloads it). The inventory photo (url_img) needs a Firestore round trip with its own TLS handshake, about 4 s;
+// it stays as the fallback for a standard TigerTag, which has no product id (0xFFFFFFFF).
+static String spoolImageUrl() {
+    if (tagMeta.valid && tagMeta.product != 0xFFFFFFFFu && tagMeta.product != 0)
+        return String("https://cdn.tigertag.io/img?id=") + String((unsigned long)tagMeta.product);
+    return fbSpool().imageUrl;
+}
+
 // The spool's photo URL, like the avatar: {"spa":N,"spi":i,"spd":"..."}; {"spa":0} means "no photo".
 static void enqueueSpoolImage(const String &url) {
     if (url.isEmpty()) { bleEnqueue("{\"spa\":0}"); return; }
@@ -1082,7 +1095,7 @@ static void pumpBle(bool periodicFull) {
     if (full || ava != lAva) { lAva = ava; enqueueAvatar(ava); }
 
     static String lSpImg = "\x01";
-    String spImg = fbSpool().imageUrl;
+    String spImg = spoolImageUrl();
     if (full || spImg != lSpImg) { lSpImg = spImg; enqueueSpoolImage(spImg); }
 
     bleFlushOne();
