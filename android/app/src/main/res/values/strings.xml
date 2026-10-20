@@ -136,6 +136,14 @@
     <string name="fw_need_ble">Bluetooth connection to the scale needed.</string>
     <string name="fw_need_net">The phone and the scale must be on the same Wi-Fi.</string>
     <string name="fw_unreachable">Cannot reach the scale at %1$s. The phone and the scale must be on the same Wi-Fi (the scale reports %2$s).</string>
+    <string name="card_refill">Refill</string>
+    <string name="card_material">Material</string>
+    <string name="card_aspect">Aspect</string>
+    <string name="card_weight">Weight</string>
+    <string name="card_diameter">Diameter</string>
+    <string name="card_nozzle">Nozzle</string>
+    <string name="card_bed">Bed</string>
+    <string name="card_dry">Drying</string>
     <string name="fw_keep_open">Keep the app open and the scale powered until it finishes.</string>
     <string name="fw_no_release">No firmware release found online.</string>
     <!-- Sound (buzzer) -->

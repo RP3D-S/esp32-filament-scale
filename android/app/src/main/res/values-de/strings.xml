@@ -133,6 +133,14 @@
     <string name="fw_need_ble">Bluetooth-Verbindung zur Waage erforderlich.</string>
     <string name="fw_need_net">Handy und Waage müssen im selben WLAN sein.</string>
     <string name="fw_unreachable">Die Waage ist unter %1$s nicht erreichbar. Handy und Waage müssen im selben WLAN sein (die Waage meldet %2$s).</string>
+    <string name="card_refill">Nachfüllpack</string>
+    <string name="card_material">Material</string>
+    <string name="card_aspect">Optik</string>
+    <string name="card_weight">Gewicht</string>
+    <string name="card_diameter">Durchmesser</string>
+    <string name="card_nozzle">Düse</string>
+    <string name="card_bed">Bett</string>
+    <string name="card_dry">Trocknen</string>
     <string name="fw_keep_open">App geöffnet lassen und die Waage am Strom, bis es fertig ist.</string>
     <string name="fw_no_release">Online wurde keine Firmware-Version gefunden.</string>
     <!-- Sound (buzzer) -->

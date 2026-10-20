@@ -133,6 +133,14 @@
     <string name="fw_need_ble">Serve la connessione Bluetooth con la bilancia.</string>
     <string name="fw_need_net">Telefono e bilancia devono essere sullo stesso Wi-Fi.</string>
     <string name="fw_unreachable">Impossibile raggiungere la bilancia a %1$s. Telefono e bilancia devono essere sullo stesso Wi-Fi (la bilancia indica %2$s).</string>
+    <string name="card_refill">Ricarica</string>
+    <string name="card_material">Materiale</string>
+    <string name="card_aspect">Aspetto</string>
+    <string name="card_weight">Peso</string>
+    <string name="card_diameter">Diametro</string>
+    <string name="card_nozzle">Ugello</string>
+    <string name="card_bed">Piatto</string>
+    <string name="card_dry">Essiccazione</string>
     <string name="fw_keep_open">Tieni l\'app aperta e la bilancia alimentata fino alla fine.</string>
     <string name="fw_no_release">Nessuna versione del firmware trovata online.</string>
     <!-- Sound (buzzer) -->

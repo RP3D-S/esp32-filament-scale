@@ -136,6 +136,14 @@
     <string name="fw_need_ble">É preciso a ligação Bluetooth à balança.</string>
     <string name="fw_need_net">O telemóvel e a balança têm de estar na mesma rede Wi-Fi.</string>
     <string name="fw_unreachable">Não foi possível alcançar a balança em %1$s. O telemóvel e a balança têm de estar na mesma rede Wi-Fi (a balança indica %2$s).</string>
+    <string name="card_refill">Refil</string>
+    <string name="card_material">Material</string>
+    <string name="card_aspect">Aspeto</string>
+    <string name="card_weight">Peso</string>
+    <string name="card_diameter">Diâmetro</string>
+    <string name="card_nozzle">Bico</string>
+    <string name="card_bed">Mesa</string>
+    <string name="card_dry">Secagem</string>
     <string name="fw_keep_open">Mantenha a app aberta e a balança ligada até terminar.</string>
     <string name="fw_no_release">Não foi encontrada nenhuma versão do firmware online.</string>
     <!-- Sound (buzzer) -->

@@ -133,6 +133,14 @@
     <string name="fw_need_ble">Se necesita la conexión Bluetooth con la báscula.</string>
     <string name="fw_need_net">El teléfono y la báscula deben estar en la misma Wi-Fi.</string>
     <string name="fw_unreachable">No se puede acceder a la báscula en %1$s. El teléfono y la báscula deben estar en la misma Wi-Fi (la báscula indica %2$s).</string>
+    <string name="card_refill">Recambio</string>
+    <string name="card_material">Material</string>
+    <string name="card_aspect">Aspecto</string>
+    <string name="card_weight">Peso</string>
+    <string name="card_diameter">Diámetro</string>
+    <string name="card_nozzle">Boquilla</string>
+    <string name="card_bed">Cama</string>
+    <string name="card_dry">Secado</string>
     <string name="fw_keep_open">Mantén la app abierta y la báscula encendida hasta que termine.</string>
     <string name="fw_no_release">No se encontró ninguna versión del firmware en línea.</string>
     <!-- Sound (buzzer) -->
