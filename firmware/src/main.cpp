@@ -612,17 +612,22 @@ static void pollRfid() {
         }
         tagLive = u; seenMs = millis();
         if (rfTest) testUid = u;
-        // Brand / material / colour live in the tag's pages 5-8. A single failed read must not mean "no
-        // data for this tag": keep trying (a few times) while the tag is in the field.
+        // Brand / material / colour / product live in the tag's pages 5-8. A single failed read must not mean "no
+        // data for this tag": 12 quick tries, then one every 3 s for as long as the tag stays in the field. A weak
+        // coupling (the UID answers, the page reads do not) can recover, and until the pages are read the spool
+        // photo falls back to the inventory one. The retry is slow because every failed try blocks loop() for a
+        // few hundred ms.
         static int metaTries = 0;
-        if (u != metaUid) { metaUid = u; metaTries = 0; tagMeta = TagMeta(); }
-        if (!tagMeta.valid && metaTries < 12) {
+        static uint32_t metaRetryAt = 0;
+        if (u != metaUid) { metaUid = u; metaTries = 0; metaRetryAt = 0; tagMeta = TagMeta(); }
+        if (!tagMeta.valid && (metaTries < 12 || (int32_t)(millis() - metaRetryAt) >= 0)) {
             metaTries++;
+            metaRetryAt = millis() + 3000;
             TagMeta m;
             if (reader.readMeta(m)) {
                 tagMeta = m;
-                Serial.printf("[RFID] tag %s product=%lu brand=%u material=%u colour=%02X%02X%02X\n", u.c_str(), (unsigned long)m.product, m.brand, m.material, m.r, m.g, m.b);
-            } else if (metaTries == 1 || metaTries == 12) {
+                Serial.printf("[RFID] tag %s product=%lu brand=%u material=%u colour=%02X%02X%02X (try %d)\n", u.c_str(), (unsigned long)m.product, m.brand, m.material, m.r, m.g, m.b, metaTries);
+            } else if (metaTries == 1 || metaTries == 12 || metaTries % 20 == 0) {
                 Serial.printf("[RFID] tag %s: could not read pages 5-8 (try %d)\n", u.c_str(), metaTries);
             }
         }
