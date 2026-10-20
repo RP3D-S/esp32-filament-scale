@@ -19,9 +19,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -144,20 +148,31 @@ object ProductCatalog {
 
 /**
  * The spool card under the scale screen (which has room to spare), like the card in the TigerTag app: tag type,
- * how much is left, the product and its details. It needs the catalogue product id from the tag; without it (a
- * standard TigerTag, no network, the catalogue not answering, or while the answer is on its way) it shows the
- * photo alone, as before.
+ * how much is left, the product and its details. It needs the catalogue product id from the tag: without it (a
+ * standard TigerTag) it shows the inventory photo alone, as before; with it, nothing shows until the catalogue has
+ * answered.
  */
 @Composable
 fun SpoolCard(s: ScaleState) {
-    val productId = remember(s.spoolImageUrl) { ProductCatalog.productIdOf(s.spoolImageUrl) }
-    if (productId == null) { SpoolPhoto(s); return }
-    val info by produceState<SpoolInfo?>(null, productId) { value = ProductCatalog.load(productId) }
-    val card = info
-    if (card == null) { SpoolPhoto(s); return }
+    // The reader sometimes loses the tag for a moment and finds it again; the scale then clears the photo URL and
+    // sends it again, which made the card blink. Keep the last URL a few seconds, so only a spool that is really
+    // gone (or a different one) changes the card.
+    val url = rememberHeld(s.spoolImageUrl, HOLD_MS)
+    val shown = if (url == s.spoolImageUrl) s else s.copy(spoolImageUrl = url)
+    val productId = remember(url) { ProductCatalog.productIdOf(url) }
+    if (productId == null) { SpoolPhoto(shown); return }   // a standard TigerTag has no catalogue entry: its inventory photo
+    // Nothing is shown until the catalogue has answered: the bare photo first and the card a moment later looked
+    // like two screens. A failed request is tried again a few times (an answer that arrives is cached for good).
+    val info by produceState<SpoolInfo?>(null, productId) {
+        repeat(5) {
+            ProductCatalog.load(productId)?.let { value = it; return@produceState }
+            delay(3_000)
+        }
+    }
+    val card = info ?: return
 
-    val photo by produceState<Bitmap?>(null, card.imageUrl, s.spoolImageUrl) {
-        value = AvatarLoader.load(card.imageUrl.ifBlank { s.spoolImageUrl }, maxDim = 512)
+    val photo by produceState<Bitmap?>(null, card.imageUrl, url) {
+        value = AvatarLoader.load(card.imageUrl.ifBlank { url }, maxDim = 512)
     }
     // Filament left = what the scale weighs minus the empty spool, when the account's inventory knows the spool.
     val net = if (s.container > 0 && s.weight > s.container) s.weight - s.container else null
@@ -226,6 +241,20 @@ fun SpoolCard(s: ScaleState) {
             }
         }
     }
+}
+
+/** How long the card outlives a lost tag. */
+private const val HOLD_MS = 5_000L
+
+/** [value] as it comes, except that a blank value only shows up after [holdMs] of staying blank. */
+@Composable
+private fun rememberHeld(value: String, holdMs: Long): String {
+    var held by remember { mutableStateOf(value) }
+    LaunchedEffect(value) {
+        if (value.isNotBlank()) held = value
+        else { delay(holdMs); held = "" }
+    }
+    return held
 }
 
 @Composable
