@@ -135,6 +135,7 @@
     <string name="fw_failed">Update failed: %1$s</string>
     <string name="fw_need_ble">Bluetooth connection to the scale needed.</string>
     <string name="fw_need_net">The phone and the scale must be on the same Wi-Fi.</string>
+    <string name="fw_unreachable">Cannot reach the scale at %1$s. The phone and the scale must be on the same Wi-Fi (the scale reports %2$s).</string>
     <string name="fw_keep_open">Keep the app open and the scale powered until it finishes.</string>
     <string name="fw_no_release">No firmware release found online.</string>
     <!-- Sound (buzzer) -->

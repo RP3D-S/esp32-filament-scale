@@ -132,6 +132,7 @@
     <string name="fw_failed">Aktualizacja nie powiodła się: %1$s</string>
     <string name="fw_need_ble">Wymagane połączenie Bluetooth z wagą.</string>
     <string name="fw_need_net">Telefon i waga muszą być w tej samej sieci Wi-Fi.</string>
+    <string name="fw_unreachable">Nie można połączyć się z wagą pod adresem %1$s. Telefon i waga muszą być w tej samej sieci Wi-Fi (waga podaje %2$s).</string>
     <string name="fw_keep_open">Nie zamykaj aplikacji i nie odłączaj wagi do końca.</string>
     <string name="fw_no_release">Nie znaleziono wersji oprogramowania online.</string>
     <!-- Sound (buzzer) -->

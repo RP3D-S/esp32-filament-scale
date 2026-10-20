@@ -74,6 +74,19 @@ class FirmwareUpdater(private val cacheDir: File) {
         null
     }
 
+    /**
+     * True when the scale answers HTTP at all (any status code): tells the phone can reach it before a 1.6 MB download,
+     * instead of after it. A stale saved address or a scale on another Wi-Fi fails here in a few seconds.
+     */
+    suspend fun reachable(host: String): Boolean = withContext(Dispatchers.IO) {
+        val quick = http.newBuilder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).build()
+        try {
+            quick.newCall(Request.Builder().url("http://$host/api/ota/status").build()).execute().use { true }
+        } catch (e: IOException) {
+            false
+        }
+    }
+
     /** Downloads the image and checks it against the published SHA-256: a corrupted file never reaches the scale. */
     suspend fun download(rel: FirmwareRelease, onPct: (Int) -> Unit): File = withContext(Dispatchers.IO) {
         val out = File(cacheDir, "firmware-${rel.version}.bin")

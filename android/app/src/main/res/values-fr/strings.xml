@@ -135,6 +135,7 @@
     <string name="fw_failed">Échec de la mise à jour : %1$s</string>
     <string name="fw_need_ble">Connexion Bluetooth avec la balance requise.</string>
     <string name="fw_need_net">Le téléphone et la balance doivent être sur le même Wi-Fi.</string>
+    <string name="fw_unreachable">Impossible de joindre la balance à %1$s. Le téléphone et la balance doivent être sur le même Wi-Fi (la balance indique %2$s).</string>
     <string name="fw_keep_open">Gardez l\'application ouverte et la balance alimentée jusqu\'à la fin.</string>
     <string name="fw_no_release">Aucune version du micrologiciel trouvée en ligne.</string>
     <!-- Sound (buzzer) -->

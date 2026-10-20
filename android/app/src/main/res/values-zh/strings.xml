@@ -132,6 +132,7 @@
     <string name="fw_failed">更新失败：%1$s</string>
     <string name="fw_need_ble">需要与秤建立蓝牙连接。</string>
     <string name="fw_need_net">手机和秤必须在同一个 Wi-Fi 网络中。</string>
+    <string name="fw_unreachable">无法访问 %1$s 处的秤。手机和秤必须在同一个 Wi-Fi 网络中（秤当前网络：%2$s）。</string>
     <string name="fw_keep_open">更新完成前请保持应用打开并为秤供电。</string>
     <string name="fw_no_release">在线未找到固件版本。</string>
     <!-- Sound (buzzer) -->

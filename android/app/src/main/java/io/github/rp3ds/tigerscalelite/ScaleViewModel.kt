@@ -428,9 +428,16 @@ class ScaleViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val s0 = _state.value
                 if (!s0.bleLinked) throw IllegalStateException(str(R.string.fw_need_ble))
-                val host = s0.host.ifBlank { s0.ip }
+                // The address the scale reports over the encrypted link is current; the saved one can be left over
+                // from another scale or another network (it was: 192.168.4.2 while the scale was somewhere else).
+                val reported = s0.ip.takeIf { it.isNotBlank() && it != "0.0.0.0" }
+                val host = reported ?: s0.host
                 if (host.isBlank()) throw IllegalStateException(str(R.string.fw_need_net))
                 if (s0.calPhase != 0) throw IllegalStateException("the calibration wizard is running")
+                // Fail in seconds, not after the download.
+                if (!updater.reachable(host)) {
+                    throw IllegalStateException(str(R.string.fw_unreachable, host, s0.ssid.ifBlank { "?" }))
+                }
 
                 val file = if (rel != null) {
                     _fw.value = FwUi.Working(0, 0)

@@ -135,6 +135,7 @@
     <string name="fw_failed">A atualização falhou: %1$s</string>
     <string name="fw_need_ble">É preciso a ligação Bluetooth à balança.</string>
     <string name="fw_need_net">O telemóvel e a balança têm de estar na mesma rede Wi-Fi.</string>
+    <string name="fw_unreachable">Não foi possível alcançar a balança em %1$s. O telemóvel e a balança têm de estar na mesma rede Wi-Fi (a balança indica %2$s).</string>
     <string name="fw_keep_open">Mantenha a app aberta e a balança ligada até terminar.</string>
     <string name="fw_no_release">Não foi encontrada nenhuma versão do firmware online.</string>
     <!-- Sound (buzzer) -->

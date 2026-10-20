@@ -53,3 +53,9 @@ log lives in git history and the synthesised entry lives in the changelog.
 
 ### Added
 - One `[FB] req <method> <path> -> HTTP <code> dns=<ms> tls=<ms> total=<ms>` log line per cloud request, to see where the time goes (bench: dns 0-1 ms with the cache, tls 1.8-2.0 s, total 2.7-3.0 s per request); updated `firmware/src/firebase.cpp`.
+
+## 2026-10-20
+
+### Fixed
+- The firmware update in the app no longer downloads 1.6 MB before finding out the scale cannot be reached: it uses the address the scale reports over the encrypted Bluetooth link (the saved one could be left over from another scale or network, e.g. 192.168.4.2) and first checks that the scale answers over Wi-Fi, failing in about 4 s with a message that names the address tried and the network the scale is on (`fw_unreachable`, nine languages); updated `FirmwareUpdater.kt`, `ScaleViewModel.kt` and every `strings.xml`. Built and installed on the phone; the failing path (scale on another Wi-Fi than the phone) was not yet exercised on the device.
+
